@@ -15,6 +15,74 @@ const prueba = ref(null)
 const probando = ref(false)
 const copiado = ref(false)
 
+// El correo de salida (con él salen las invitaciones al panel). La clave no
+// vuelve del hub: el campo queda vacío y, si se deja así, se conserva la que
+// estaba.
+const correo = reactive({ host: '', puerto: 587, seguridad: 'starttls', remitente: '', usuario: '', clave: '', nombre: '' })
+const correoEstado = ref({ configurado: false, clave_puesta: false })
+const correoError = ref('')
+const correoListo = ref('')
+const correoGuardando = ref(false)
+const correoProbando = ref(false)
+const puertos = { tls: 465, starttls: 587, ninguna: 25 }
+
+function llenaCorreo(c) {
+  correoEstado.value = c || { configurado: false, clave_puesta: false }
+  Object.assign(correo, {
+    host: c?.host || '',
+    puerto: c?.puerto || 587,
+    seguridad: c?.seguridad || 'starttls',
+    remitente: c?.remitente || '',
+    usuario: c?.usuario || '',
+    clave: '',
+    nombre: c?.nombre || '',
+  })
+}
+
+function cambiaSeguridad() {
+  // El puerto de siempre para cada una, si no lo habían cambiado a mano.
+  if (Object.values(puertos).includes(Number(correo.puerto))) correo.puerto = puertos[correo.seguridad]
+}
+
+async function guardaCorreo() {
+  correoError.value = ''
+  correoListo.value = ''
+  correoGuardando.value = true
+  try {
+    llenaCorreo(await api.put('/v1/org/correo', { ...correo, puerto: Number(correo.puerto) }))
+    correoListo.value = 'Guardado. Prueba que llegue antes de invitar a alguien.'
+  } catch (e) {
+    correoError.value = e.message
+  } finally {
+    correoGuardando.value = false
+  }
+}
+
+async function pruebaCorreo() {
+  correoError.value = ''
+  correoListo.value = ''
+  correoProbando.value = true
+  try {
+    const r = await api.post('/v1/org/correo/prueba')
+    correoListo.value = `Se mandó un correo de prueba a ${r.para}. Si llega, las invitaciones también llegarán.`
+  } catch (e) {
+    correoError.value = e.message
+  } finally {
+    correoProbando.value = false
+  }
+}
+
+async function quitaCorreo() {
+  correoError.value = ''
+  correoListo.value = ''
+  try {
+    llenaCorreo(await api.put('/v1/org/correo', { quitar: true }))
+    correoListo.value = 'Sin correo de salida: las invitaciones vuelven a ser un enlace para compartir.'
+  } catch (e) {
+    correoError.value = e.message
+  }
+}
+
 function llena(o) {
   org.value = o
   Object.assign(f, {
@@ -24,6 +92,7 @@ function llena(o) {
     dias_historial: o.dias_historial,
     webhook_url: o.webhook_url,
   })
+  if (o.correo) llenaCorreo(o.correo)
 }
 
 onMounted(async () => {
@@ -192,5 +261,50 @@ const intervaloTexto = computed(() => {
         <template v-else>Llegó, pero contestó HTTP {{ prueba }}.</template>
       </p>
     </div>
+
+    <form v-if="org.correo" class="tarjeta" style="max-width: 680px; margin-top: 18px" @submit.prevent="guardaCorreo">
+      <h3>Correo de salida</h3>
+      <p class="apagado chico">
+        Con él salen las invitaciones al panel. device-track no usa el correo de ningún otro
+        sistema: pon una cuenta de tu organización (mejor una solo para esto, o una clave de
+        aplicación). Sin él, invitar es un enlace que compartes tú.
+      </p>
+      <p class="chico" style="margin-top: 6px">
+        {{ correoEstado.configurado ? `Configurado: sale como ${correoEstado.remitente}.` : 'Todavía no hay correo de salida.' }}
+      </p>
+      <div class="rejilla-campos" style="margin-top: 10px">
+        <div><label>Servidor SMTP</label><input v-model="correo.host" placeholder="smtp.gmail.com" autocomplete="off" required /></div>
+        <div>
+          <label>Seguridad</label>
+          <select v-model="correo.seguridad" @change="cambiaSeguridad">
+            <option value="starttls">STARTTLS (587)</option>
+            <option value="tls">TLS directo (465)</option>
+            <option value="ninguna">Sin cifrar (solo en una red propia)</option>
+          </select>
+        </div>
+        <div><label>Puerto</label><input v-model="correo.puerto" type="number" min="1" max="65535" required /></div>
+        <div><label>Remitente</label><input v-model="correo.remitente" type="email" placeholder="avisos@tu-empresa.com" required /></div>
+        <div><label>Nombre que se ve <span class="apagado">(opcional)</span></label><input v-model="correo.nombre" placeholder="device-track de tu empresa" /></div>
+        <div><label>Usuario</label><input v-model="correo.usuario" placeholder="Normalmente, el mismo remitente" autocomplete="off" /></div>
+        <div>
+          <label>Clave</label>
+          <input
+            v-model="correo.clave"
+            type="password"
+            autocomplete="new-password"
+            :placeholder="correoEstado.clave_puesta ? 'Puesta: vacía para no cambiarla' : ''"
+          />
+        </div>
+      </div>
+      <p v-if="correoError" class="aviso" style="margin-top: 10px">{{ correoError }}</p>
+      <p v-if="correoListo" class="exito chico" style="margin-top: 10px">{{ correoListo }}</p>
+      <div class="en-linea" style="flex-wrap: wrap; margin-top: 12px">
+        <button class="boton" :disabled="correoGuardando">{{ correoGuardando ? 'Guardando…' : 'Guardar' }}</button>
+        <button type="button" class="boton suave chico" :disabled="!correoEstado.configurado || correoProbando" @click="pruebaCorreo">
+          {{ correoProbando ? 'Mandando…' : 'Mandarme un correo de prueba' }}
+        </button>
+        <button v-if="correoEstado.configurado" type="button" class="boton suave chico" @click="quitaCorreo">Quitar</button>
+      </div>
+    </form>
   </template>
 </template>

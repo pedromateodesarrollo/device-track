@@ -11,6 +11,8 @@ import 'package:device_track_hub/src/http/rutas_auth.dart';
 import 'package:device_track_hub/src/seguridad.dart';
 import 'package:test/test.dart';
 
+import 'smtp_falso.dart';
+
 /// El hub de punta a punta contra un Postgres de verdad.
 ///
 /// Necesita `DT_PRUEBA_DATABASE_URL` apuntando a una base DESECHABLE: la
@@ -602,5 +604,84 @@ void main() {
     expect(d['dominio_nombre'], 'Duralon');
     final (_, despues) = await pide('GET', '/v1/alertas?equipo=$idJ', token: admin);
     expect((despues['alertas'] as List).where((a) => a['regla'] == rJf['id']), isEmpty);
+  });
+
+  test('correo de salida: la clave no vuelve, y la invitación sale por él', () async {
+    final smtp = await SmtpFalso.arranca();
+    try {
+      // Sin correo de salida, invitar es solo el enlace.
+      var (st, d) = await pide('POST', '/v1/usuarios',
+          json: {'correo': 'sin-correo@prueba.do', 'rol': 'consulta'}, token: admin);
+      expect(st, 201, reason: '$d');
+      expect(d['envio'], isNull);
+      expect(d['correo'], 'sin-correo@prueba.do');
+      expect(d['enlace'], contains('/#/activar/'));
+
+      final config = {
+        'host': '127.0.0.1',
+        'puerto': smtp.puerto,
+        'seguridad': 'ninguna',
+        'remitente': 'Avisos@Prueba.do',
+        'usuario': 'avisos',
+        'clave': 'secreto-smtp',
+        'nombre': 'device-track de Prueba',
+      };
+      (st, d) = await pide('PUT', '/v1/org/correo', json: {...config, 'host': 'smtp mal'}, token: admin);
+      expect(st, 400);
+      expect(d['error'], 'host_invalido');
+      (st, d) = await pide('PUT', '/v1/org/correo', json: {...config, 'seguridad': 'ssl3'}, token: admin);
+      expect(d['error'], 'seguridad_invalida');
+      (st, _) = await pide('PUT', '/v1/org/correo', json: config, token: consulta);
+      expect(st, 403);
+
+      (st, d) = await pide('PUT', '/v1/org/correo', json: config, token: admin);
+      expect(st, 200, reason: '$d');
+      expect(d['remitente'], 'avisos@prueba.do');
+      expect(d['clave_puesta'], isTrue);
+      expect(jsonEncode(d), isNot(contains('secreto-smtp')));
+      // Guardar sin clave deja la que estaba.
+      (st, d) = await pide('PUT', '/v1/org/correo',
+          json: {...config, 'clave': '', 'nombre': 'Avisos de Prueba'}, token: admin);
+      expect(d['clave_puesta'], isTrue);
+      (st, d) = await pide('GET', '/v1/org', token: admin);
+      expect(d['correo']['configurado'], isTrue);
+      expect(d['correo']['nombre'], 'Avisos de Prueba');
+      expect(jsonEncode(d), isNot(contains('secreto-smtp')));
+      (st, d) = await pide('GET', '/v1/org', token: consulta);
+      expect(d.containsKey('correo'), isFalse);
+
+      // La prueba va a quien la pide.
+      (st, d) = await pide('POST', '/v1/org/correo/prueba', token: admin);
+      expect(st, 200, reason: '$d');
+      expect(d['para'], 'admin@prueba.do');
+      expect(smtp.ordenes, contains('RCPT TO:<admin@prueba.do>'));
+
+      (st, d) = await pide('POST', '/v1/usuarios',
+          json: {'correo': 'nueva@prueba.do', 'nombre': 'Nueva', 'rol': 'consulta'}, token: admin);
+      expect(st, 201, reason: '$d');
+      expect(d['envio'], {'enviado': true, 'para': 'nueva@prueba.do'});
+      expect(d['correo'], 'nueva@prueba.do');
+      final enlace = d['enlace'] as String;
+      final nueva = d['id'];
+      expect(SmtpFalso.parte(smtp.mensajes.last, 'text/html'), contains(enlace));
+      expect(SmtpFalso.parte(smtp.mensajes.last, 'text/plain'), contains(enlace));
+      final auth = smtp.ordenes.lastWhere((o) => o.startsWith('AUTH PLAIN '));
+      expect(utf8.decode(base64.decode(auth.substring(11))), '\u0000avisos\u0000secreto-smtp');
+
+      // Si el servidor rechaza, la invitación queda y el enlace sirve igual.
+      smtp.rechazaAuth = true;
+      (st, d) = await pide('POST', '/v1/usuarios/$nueva/invitacion', token: admin);
+      expect(st, 200, reason: '$d');
+      expect(d['envio']['enviado'], isFalse);
+      expect(d['envio']['error'], 'correo_autenticacion');
+      expect(d['enlace'], contains('/#/activar/'));
+
+      (st, d) = await pide('PUT', '/v1/org/correo', json: {'quitar': true}, token: admin);
+      expect(d['configurado'], isFalse);
+      (st, d) = await pide('GET', '/v1/org', token: admin);
+      expect(d['correo']['configurado'], isFalse);
+    } finally {
+      await smtp.cierra();
+    }
   });
 }

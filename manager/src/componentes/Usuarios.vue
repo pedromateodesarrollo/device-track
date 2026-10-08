@@ -49,7 +49,7 @@ async function invita() {
       rol: rol.value,
       dominios: rol.value === 'admin' ? [] : elegidos.value,
     })
-    enlace.value = { correo: u.correo, enlace: u.enlace }
+    enlace.value = { correo: u.correo, enlace: u.enlace, envio: u.envio }
     correo.value = ''
     nombre.value = ''
     elegidos.value = []
@@ -62,7 +62,7 @@ async function invita() {
 async function reinvita(u) {
   try {
     const d = await api.post(`/v1/usuarios/${u.id}/invitacion`)
-    enlace.value = { correo: u.correo, enlace: d.enlace }
+    enlace.value = { correo: u.correo, enlace: d.enlace, envio: d.envio }
     await carga()
   } catch (e) {
     error.value = e.message
@@ -131,8 +131,20 @@ onMounted(() => {
   <p v-if="error" class="aviso">{{ error }}</p>
 
   <div v-if="enlace" class="exito">
-    Enlace para <strong>{{ enlace.correo }}</strong>. Mándaselo por donde quieras:
-    con él pone su propia clave. Sirve una vez y vence en 7 días.
+    <!-- Con correo de salida (Organización), la invitación ya le llegó; el
+         enlace se enseña igual, por si no le llega o hay que dárselo en mano. -->
+    <template v-if="enlace.envio?.enviado">
+      Le mandamos la invitación por correo a <strong>{{ enlace.correo }}</strong>. Por si no le
+      llega, este es el enlace: sirve una vez y vence en 7 días.
+    </template>
+    <template v-else>
+      <span v-if="enlace.envio" class="aviso" style="display: block; margin-bottom: 8px">
+        El correo no salió ({{ enlace.envio.detalle || enlace.envio.error }}). Revisa el correo de
+        salida en Organización; mientras, compártele el enlace.
+      </span>
+      Enlace para <strong>{{ enlace.correo }}</strong>. Mándaselo por donde quieras:
+      con él pone su propia clave. Sirve una vez y vence en 7 días.
+    </template>
     <div class="secreto">{{ enlace.enlace }}</div>
     <div style="display: flex; gap: 8px; margin-top: 10px">
       <button class="boton chico" @click="copia">{{ copiado ? 'Copiado' : 'Copiar' }}</button>
@@ -143,8 +155,8 @@ onMounted(() => {
   <div class="tarjeta" style="margin-bottom: 20px">
     <h3>Invitar a alguien</h3>
     <p class="apagado">
-      El hub no manda correos: te da un enlace y tú se lo pasas. Tú nunca ves
-      su clave.
+      Si la organización tiene correo de salida (en Organización), le llega la invitación;
+      si no, te da un enlace y tú se lo pasas. Tú nunca ves su clave.
     </p>
     <div class="rejilla-campos" style="max-width: 760px">
       <div><label>Correo</label><input v-model="correo" type="email" /></div>
@@ -168,7 +180,7 @@ onMounted(() => {
         {{ elegidos.length ? 'Solo los de esos dominios, con sus zonas, reglas, alertas y códigos de alta.' : 'Sin marcar ninguno: toda la organización.' }}
       </p>
     </template>
-    <button class="boton" style="margin-top: 14px" :disabled="!correo" @click="invita">Crear enlace</button>
+    <button class="boton" style="margin-top: 14px" :disabled="!correo" @click="invita">Invitar</button>
   </div>
 
   <table class="tarjetas">

@@ -1,6 +1,7 @@
 import 'dart:convert';
 
 import '../alertas.dart';
+import '../correo.dart';
 import '../db.dart';
 import '../dominios.dart';
 import '../ordenes.dart';
@@ -573,15 +574,96 @@ void registraRutasPanel(Servidor s, Canal canal, Ordenes ordenes, Alertas alerta
   s.ruta('GET', '/v1/org', (p) async {
     final o = await p.bd.fila(
       '''select id, nombre, slug, intervalo_s, ubicacion, dias_historial, webhook_url,
-                webhook_secreto <> '' as webhook_firmado, creado
+                webhook_secreto <> '' as webhook_firmado, correo, creado
            from dt.org where id = @o''',
       {'o': p.s.org},
     );
     // La URL de un webhook suele llevar su propio token (la de Slack, por
-    // ejemplo): solo la ve quien administra.
-    if (!p.s.esAdmin) o!.remove('webhook_url');
+    // ejemplo): solo la ve quien administra. El correo de salida también, y
+    // nunca con su clave.
+    final correo = ConfigCorreo.deJson(o!.remove('correo'));
+    if (!p.s.esAdmin) {
+      o.remove('webhook_url');
+    } else {
+      o['correo'] = correo?.publico() ?? {'configurado': false};
+    }
     return Respuesta.ok(o);
   });
+
+  // El correo de salida (migración 0003): con él salen las invitaciones al
+  // panel. device-track no usa el correo de ningún otro sistema: cada
+  // organización pone el suyo. La clave no vuelve nunca; si no viene, o viene
+  // vacía, se queda la que estaba. `{quitar: true}` lo borra.
+  s.ruta('PUT', '/v1/org/correo', (p) async {
+    if (p.cuerpo['quitar'] == true) {
+      await p.bd.ejecuta("update dt.org set correo = '{}'::jsonb where id = @o", {'o': p.s.org});
+      return Respuesta.ok({'configurado': false});
+    }
+    final actual = ConfigCorreo.deJson(
+      (await p.bd.fila('select correo from dt.org where id = @o', {'o': p.s.org}))?['correo'],
+    );
+    final host = p.texto('host').toLowerCase();
+    final puerto = p.entero('puerto') ?? 0;
+    final seguridad = p.texto('seguridad', porDefecto: 'starttls');
+    final remitente = p.texto('remitente').toLowerCase();
+    if (host.isEmpty || host.contains(RegExp(r'[\s/:@]'))) {
+      return Respuesta.falla(400, 'host_invalido', 'El servidor es un nombre como smtp.gmail.com');
+    }
+    if (puerto < 1 || puerto > 65535) {
+      return Respuesta.falla(400, 'puerto_invalido', 'El puerto va de 1 a 65535 (suele ser 465 o 587)');
+    }
+    if (!ConfigCorreo.seguridades.contains(seguridad)) {
+      return Respuesta.falla(400, 'seguridad_invalida', 'La seguridad es tls, starttls o ninguna');
+    }
+    if (!RegExp(r'^[^@\s]+@[^@\s]+\.[^@\s]+$').hasMatch(remitente)) {
+      return Respuesta.falla(400, 'remitente_invalido', 'El remitente es una dirección de correo');
+    }
+    final clave = p.texto('clave').isNotEmpty ? p.texto('clave') : (actual?.clave ?? '');
+    final c = ConfigCorreo(
+      host: host,
+      puerto: puerto,
+      seguridad: seguridad,
+      remitente: remitente,
+      usuario: p.texto('usuario'),
+      clave: clave,
+      nombre: p.texto('nombre'),
+    );
+    await p.bd.ejecuta(
+      'update dt.org set correo = @c::jsonb where id = @o',
+      {'c': jsonEncode(c.aJson()), 'o': p.s.org},
+    );
+    return Respuesta.ok(c.publico());
+  }, permiso: 'admin');
+
+  // Manda un correo de prueba a quien lo pide: si llega, las invitaciones
+  // también llegarán. Si no, dice qué contestó el servidor.
+  s.ruta('POST', '/v1/org/correo/prueba', (p) async {
+    final c = ConfigCorreo.deJson(
+      (await p.bd.fila('select correo from dt.org where id = @o', {'o': p.s.org}))?['correo'],
+    );
+    if (c == null || !c.completa) {
+      return Respuesta.falla(400, 'correo_sin_configurar', 'Primero guarda el correo de salida');
+    }
+    final yo = p.s.esUsuario
+        ? await p.bd.fila('select correo from dt.usuario where id = @u', {'u': p.s.usuario})
+        : null;
+    final para = (yo?['correo'] ?? '').toString();
+    if (!para.contains('@')) {
+      return Respuesta.falla(400, 'sin_destinatario', 'La prueba va al correo de quien la pide: entra con tu usuario');
+    }
+    try {
+      await enviaCorreo(
+        c,
+        para: para,
+        asunto: 'Prueba del correo de device-track',
+        texto: 'Si lees esto, el correo de salida de tu organización funciona: '
+            'las invitaciones al panel saldrán por aquí.',
+      );
+    } on CorreoError catch (e) {
+      return Respuesta.falla(502, e.codigo, e.detalle);
+    }
+    return Respuesta.ok({'enviado': true, 'para': para});
+  }, permiso: 'admin');
 
   s.ruta('PATCH', '/v1/org', (p) async {
     final cambios = <String>[];

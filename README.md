@@ -58,6 +58,11 @@ device-track resuelve eso con dos cosas: **una app pequeña en cada equipo** y
   fijo, su número de serie, en qué dominio está.
 * **Separar por dominios**: los equipos de cada cliente, almacén o sucursal, y
   a quién dejas ver cuáles. El encargado de un cliente ve los suyos; tú, todos.
+* **Saber quién lo tenía**: si la app que corre en el equipo dice quién tiene la
+  sesión, el panel enseña el último usuario de cada uno, y su almacén.
+* **Invitar por correo**: cada organización pone su propio correo de salida
+  (SMTP) en el panel y las invitaciones le llegan a cada persona. Sin él, la
+  invitación es un enlace que compartes tú.
 
 ![El mapa con los equipos y las zonas](docs/img/mapa.jpg)
 

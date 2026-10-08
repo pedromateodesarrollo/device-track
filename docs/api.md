@@ -142,6 +142,18 @@ que llegó.
 | `contexto` | objeto | Lo que la app quiera contar: empresa, quién tiene la sesión, almacén. Se guarda por fuente. Hasta 4 KB. |
 | `reportes` | lista | Reportes atrasados, cada uno con estos mismos campos y su `t`. |
 
+**Claves de convención en `contexto`.** El contexto es libre, pero el panel
+entiende tres claves, si vienen:
+
+| Clave | Tipo | Qué hace el panel |
+|---|---|---|
+| `usuario` | texto | Quién tiene (o tuvo) la sesión de la app. Sale en la lista de equipos como «Último usuario», tomado de la fuente que reportó más reciente. |
+| `almacen` o `lugar` | texto | Dónde trabaja: va debajo del usuario. |
+| `sesion` | sí/no | `false` = la app ya cerró la sesión, pero el `usuario` es el de la última; el panel lo marca «sin sesión». Es justo lo que se pregunta cuando un equipo no aparece. |
+
+Ejemplo (el WMS de Chalona): `{"usuario": "Ana Pérez", "usuario_id": 1050,
+"empresa": 237, "almacen": "A13 · Repuestos", "sesion": true}`.
+
 La respuesta trae la configuración vigente y las órdenes que estén esperando:
 un equipo sin WebSocket también se entera, en el siguiente reporte.
 
@@ -258,7 +270,11 @@ evaluación la vuelve a abrir.
 ### Organización, personas y llaves
 
 Igual que apk-server: `POST /v1/auth/login`, `/v1/usuarios` (con invitación por
-enlace de un solo uso; `PATCH /v1/usuarios/:id` cambia `rol`, `nombre` o
+enlace de un solo uso, que además se manda por correo si la organización tiene
+correo de salida: la respuesta de `POST /v1/usuarios` y de
+`POST /v1/usuarios/:id/invitacion` trae `enlace` siempre y `envio`, que es
+`null` sin correo de salida, `{enviado: true, para}` o `{enviado: false,
+error, detalle}`; `PATCH /v1/usuarios/:id` cambia `rol`, `nombre` o
 `dominios`, solo lo que venga) y `/v1/llaves`. Personas y llaves llevan
 `dominios: [...]` (ids o slugs; vacío = toda la organización). `GET /v1/yo`
 dice los dominios de quien pregunta: `dominios: [{id, nombre, slug}]`, vacío si
@@ -266,10 +282,12 @@ alcanza toda la organización.
 
 | | |
 |---|---|
-| `GET /v1/org` | La configuración: `intervalo_s`, `ubicacion`, `dias_historial`, si el webhook va firmado y —solo para `admin`, porque suele llevar su propio token— `webhook_url`. |
+| `GET /v1/org` | La configuración: `intervalo_s`, `ubicacion`, `dias_historial`, si el webhook va firmado y —solo para `admin`, porque suele llevar su propio token— `webhook_url` y `correo` (el correo de salida, sin la clave: `clave_puesta` y `configurado`). |
 | `PATCH /v1/org` | Cambiarla. Los equipos conectados reciben la configuración nueva al instante; los demás, en su próximo reporte. |
 | `POST /v1/org/webhook/secreto` | Genera el secreto con que se firma el webhook. Se enseña una vez. |
 | `POST /v1/org/webhook/prueba` | Manda un POST de prueba y dice qué contestó. |
+| `PUT /v1/org/correo` | El correo de salida, con el que salen las invitaciones: `host`, `puerto`, `seguridad` (`tls` = TLS directo, 465; `starttls`, 587; `ninguna`, solo en una red propia), `remitente`, `usuario`, `clave`, `nombre` (el que se ve en el «De:»). La `clave` no vuelve nunca; si no viene, o viene vacía, se queda la que estaba. `{"quitar": true}` lo borra. Solo `admin`. |
+| `POST /v1/org/correo/prueba` | Manda un correo de prueba a quien lo pide. Si el servidor no lo acepta, `502` con lo que contestó (`correo_autenticacion`, `correo_conexion`, `correo_tls`, `correo_sin_starttls`, `correo_rechazado`, `correo_tiempo`). |
 
 El historial de reportes se borra solo pasados `dias_historial` (90 por
 defecto), y una orden que nadie contestó pasa a `vencida` a su hora.

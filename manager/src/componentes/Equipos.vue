@@ -93,6 +93,22 @@ function limpia() {
 }
 
 const abre = (e) => (location.hash = `#/panel/equipos/${e.id}`)
+
+// Quién lo tenía: el `usuario` del contexto de la fuente que reportó más
+// reciente (la app manda quién tiene la sesión, por convención; ver
+// docs/api.md). `almacen` o `lugar`, si vienen, van debajo. Con `sesion: false`
+// la app ya cerró la sesión y el nombre es el de la ÚLTIMA: justo lo que se
+// pregunta cuando una terminal no aparece.
+const ultimoUsuario = (e) => {
+  const fuentes = Array.isArray(e.fuentes) ? e.fuentes : []
+  const f = fuentes
+    .filter((x) => x?.contexto && typeof x.contexto.usuario === 'string' && x.contexto.usuario.trim())
+    .sort((a, b) => new Date(b.ultima_vez) - new Date(a.ultima_vez))[0]
+  if (!f) return null
+  const c = f.contexto
+  const donde = typeof c.almacen === 'string' ? c.almacen : typeof c.lugar === 'string' ? c.lugar : ''
+  return { nombre: c.usuario.trim(), donde, sinSesion: c.sesion === false, cuando: f.ultima_vez }
+}
 const red = (e) => {
   if (!e.red_tipo) return ''
   return e.red_tipo === 'wifi' && e.red_ssid ? `Wi-Fi · ${e.red_ssid}` : redes[e.red_tipo] || e.red_tipo
@@ -140,7 +156,7 @@ const red = (e) => {
   <table v-if="visibles.length" class="tabla-equipos solo-ancho">
     <thead>
       <tr>
-        <th>Equipo</th><th v-if="variosDominios">Dominio</th><th>Asignado a</th><th>Estado</th>
+        <th>Equipo</th><th v-if="variosDominios">Dominio</th><th>Último usuario</th><th>Asignado a</th><th>Estado</th>
         <th>Última vez</th><th>Batería</th><th>Red</th><th>Alertas</th>
       </tr>
     </thead>
@@ -155,6 +171,14 @@ const red = (e) => {
           </div>
         </td>
         <td v-if="variosDominios">{{ e.dominio_nombre }}</td>
+        <td :title="ultimoUsuario(e) ? fecha(ultimoUsuario(e).cuando) : ''">
+          <template v-if="ultimoUsuario(e)">
+            {{ ultimoUsuario(e).nombre }}
+            <div class="apagado chico">
+              {{ [ultimoUsuario(e).donde, ultimoUsuario(e).sinSesion && 'sin sesión'].filter(Boolean).join(' · ') }}
+            </div>
+          </template>
+        </td>
         <td>{{ e.asignado_a }}</td>
         <td><span class="estado-equipo" :class="e.estado">{{ estados[e.estado] }}</span></td>
         <td :title="fecha(e.ultima_vez)">
@@ -189,6 +213,11 @@ const red = (e) => {
       </div>
       <div class="apagado chico">
         {{ [e.etiqueta, variosDominios && e.dominio_nombre, e.asignado_a].filter(Boolean).join(' · ') || e.modelo }}
+      </div>
+      <div v-if="ultimoUsuario(e)" class="chico">
+        {{ ultimoUsuario(e).nombre }}<span class="apagado">{{
+          [ultimoUsuario(e).donde, ultimoUsuario(e).sinSesion && 'sin sesión'].filter(Boolean).map((x) => ' · ' + x).join('')
+        }}</span>
       </div>
       <div class="fila-3">
         <span>{{ e.conectado ? 'conectado' : hace(e.ultima_vez) }}</span>

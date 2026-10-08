@@ -1,3 +1,4 @@
+import '../correo.dart';
 import '../db.dart';
 import '../dominios.dart';
 import '../limitador.dart';
@@ -173,8 +174,9 @@ void registraRutasAuth(Servidor s) {
   }, permiso: 'admin');
 
   // Invitar: la persona queda dada de alta sin clave, y lo que se devuelve es
-  // el enlace (una sola vez: se guarda hasheado). El hub no manda correos;
-  // el enlace lo comparte quien invita, por donde quiera.
+  // el enlace (una sola vez: se guarda hasheado). Si la organización tiene
+  // correo de salida (migración 0003), además se lo manda; si no, el enlace lo
+  // comparte quien invita, por donde quiera. `envio` dice cuál de las dos.
   s.ruta('POST', '/v1/usuarios', (p) async {
     final correo = p.texto('correo').toLowerCase();
     final problema = _revisaCorreo(correo);
@@ -202,7 +204,12 @@ void registraRutasAuth(Servidor s) {
       },
     );
     final token = await nuevaInvitacion(p.bd, u!['id'] as int);
-    return Respuesta.creado({...u, 'enlace': enlaceInvitacion(p.urlPublica, token)});
+    final enlace = enlaceInvitacion(p.urlPublica, token);
+    return Respuesta.creado({
+      ...u,
+      'enlace': enlace,
+      'envio': await _mandaInvitacion(p, correo, '${u['nombre']}', enlace),
+    });
   }, permiso: 'admin');
 
   // Otro enlace para la misma persona (el anterior venció o se perdió). Sirve
@@ -210,12 +217,16 @@ void registraRutasAuth(Servidor s) {
   s.ruta('POST', '/v1/usuarios/:id/invitacion', (p) async {
     final id = p.enteroParam('id');
     final u = await p.bd.fila(
-      'select id from dt.usuario where id = @i and org = @o',
+      'select id, correo, nombre from dt.usuario where id = @i and org = @o',
       {'i': id, 'o': p.s.org},
     );
     if (u == null) return Respuesta.falla(404, 'no_encontrado', '');
     final token = await nuevaInvitacion(p.bd, id);
-    return Respuesta.ok({'enlace': enlaceInvitacion(p.urlPublica, token)});
+    final enlace = enlaceInvitacion(p.urlPublica, token);
+    return Respuesta.ok({
+      'enlace': enlace,
+      'envio': await _mandaInvitacion(p, '${u['correo']}', '${u['nombre']}', enlace),
+    });
   }, permiso: 'admin');
 
   // Cambia solo lo que viene: `rol`, `nombre`, `dominios`.
@@ -321,6 +332,51 @@ Future<String> nuevaInvitacion(Bd bd, int usuario) async {
   );
   return token;
 }
+
+/// Manda el enlace de invitación por el correo de salida de la organización.
+/// Devuelve `null` si no hay correo configurado (el enlace se comparte a
+/// mano), `{enviado: true, para}` o `{enviado: false, error, detalle}`: que no
+/// salga el correo no deshace la invitación, el enlace sigue sirviendo.
+Future<Map<String, Object?>?> _mandaInvitacion(Peticion p, String para, String nombre, String enlace) async {
+  final o = await p.bd.fila('select nombre, correo from dt.org where id = @o', {'o': p.s.org});
+  final c = ConfigCorreo.deJson(o?['correo']);
+  if (c == null || !c.completa) return null;
+  final org = '${o?['nombre'] ?? ''}';
+  final dias = vidaInvitacion.inDays;
+  try {
+    await enviaCorreo(
+      c,
+      para: para,
+      asunto: 'Te invitaron al panel de device-track de $org',
+      texto: 'Hola, $nombre:\n\n'
+          'Te invitaron al panel de device-track de $org, donde se ven los equipos, '
+          'dónde están y si siguen vivos.\n\n'
+          'Para entrar, pon tu clave aquí (el enlace sirve una vez y vence en $dias días):\n'
+          '$enlace\n\n'
+          'Si no esperabas este correo, ignóralo.',
+      html: '<div style="font-family:-apple-system,Segoe UI,Roboto,Arial,sans-serif;'
+          'max-width:560px;margin:0 auto;padding:16px;color:#1f2328">'
+          '<p>Hola, ${_html(nombre)}:</p>'
+          '<p>Te invitaron al panel de <strong>device-track</strong> de ${_html(org)}, '
+          'donde se ven los equipos, dónde están y si siguen vivos.</p>'
+          '<p style="margin:24px 0"><a href="${_html(enlace)}" style="background:#3b82f6;'
+          'color:#fff;padding:12px 20px;border-radius:8px;text-decoration:none">'
+          'Poner mi clave</a></p>'
+          '<p style="font-size:13px;color:#57606a">El enlace sirve una vez y vence en $dias días. '
+          'Si no esperabas este correo, ignóralo.</p></div>',
+    );
+    return {'enviado': true, 'para': para};
+  } on CorreoError catch (e) {
+    log.aviso('correo', 'invitación a $para no salió: ${e.codigo} ${e.detalle}');
+    return {'enviado': false, 'error': e.codigo, 'detalle': e.detalle};
+  }
+}
+
+String _html(String s) => s
+    .replaceAll('&', '&amp;')
+    .replaceAll('<', '&lt;')
+    .replaceAll('>', '&gt;')
+    .replaceAll('"', '&quot;');
 
 String enlaceInvitacion(String urlPublica, String token) =>
     '$urlPublica/#/activar/$token';
