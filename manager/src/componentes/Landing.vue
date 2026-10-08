@@ -16,9 +16,9 @@ const diagrama = `  Equipo (agente o app)            Hub                       Q
       <span class="etiqueta">Código abierto · Apache-2.0</span>
       <h1>Dónde está cada equipo, y si sigue vivo.</h1>
       <p class="lema">
-        Las terminales del almacén, los teléfonos de la ruta: cada uno reporta
-        batería, red y ubicación, y el hub te avisa cuando algo no cuadra. Y si
-        uno se pierde entre los estantes, lo haces sonar.
+        Una página donde ves todos los teléfonos y terminales de tu empresa:
+        cuántos tienes, dónde están, si siguen funcionando y quién los usa. Y si
+        uno se pierde entre los estantes, lo haces sonar desde aquí.
       </p>
       <div class="acciones">
         <a href="#/panel" class="boton">Entrar al panel</a>
@@ -30,7 +30,22 @@ const diagrama = `  Equipo (agente o app)            Hub                       Q
 
   <section class="seccion">
     <div class="contenedor">
-      <div class="diagrama">{{ diagrama }}</div>
+      <h2>Cómo funciona</h2>
+      <div class="pasos" style="margin-top: 22px">
+        <div class="paso">
+          <h3>Una app en cada equipo</h3>
+          <p class="apagado">La instalas y escaneas un código QR que te da esta página. Eso es todo: el equipo aparece en tu lista.</p>
+        </div>
+        <div class="paso">
+          <h3>El equipo cuenta cómo está</h3>
+          <p class="apagado">Cada 10 minutos, solo y con la pantalla apagada: batería, red, espacio libre, apps instaladas y —si tú lo pides— dónde está.</p>
+        </div>
+        <div class="paso">
+          <h3>Tú lo ves todo aquí</h3>
+          <p class="apagado">La lista, el mapa y un aviso cuando algo va mal: sin batería, una hora callado, fuera del almacén, apagado.</p>
+        </div>
+      </div>
+      <img class="captura" src="/img/equipos.jpg" alt="La lista de equipos: nombre, a quién está asignado, si está conectado, batería y red" />
     </div>
   </section>
 
@@ -85,6 +100,14 @@ const diagrama = `  Equipo (agente o app)            Hub                       Q
           <p class="apagado">Todo lo que hace el panel. Ver la <a href="#/docs">documentación</a>.</p>
         </div>
       </div>
+    </div>
+  </section>
+
+  <section class="seccion">
+    <div class="contenedor">
+      <h2>Por dentro</h2>
+      <p class="apagado" style="margin: 8px 0 18px">Para quien lo monta o lo integra con otro sistema.</p>
+      <div class="diagrama">{{ diagrama }}</div>
     </div>
   </section>
 </template>
