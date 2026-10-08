@@ -151,8 +151,8 @@ entiende tres claves, si vienen:
 | `almacen` o `lugar` | texto | Dónde trabaja: va debajo del usuario. |
 | `sesion` | sí/no | `false` = la app ya cerró la sesión, pero el `usuario` es el de la última; el panel lo marca «sin sesión». Es justo lo que se pregunta cuando un equipo no aparece. |
 
-Ejemplo (el WMS de Chalona): `{"usuario": "Ana Pérez", "usuario_id": 1050,
-"empresa": 237, "almacen": "A13 · Repuestos", "sesion": true}`.
+Ejemplo (la app de un almacén): `{"usuario": "Ana Pérez", "usuario_id": 42,
+"empresa": 7, "almacen": "A1 · Repuestos", "sesion": true}`.
 
 La respuesta trae la configuración vigente y las órdenes que estén esperando:
 un equipo sin WebSocket también se entera, en el siguiente reporte.
