@@ -3,8 +3,9 @@
 ## Reportar un fallo
 
 Escribe a **pedromateo.desarrollo@gmail.com** con «device-track» en el asunto.
-Si el fallo permite ver equipos o ubicaciones de otra organización, o mandarle
-órdenes a un equipo ajeno, dilo en la primera línea.
+Si el fallo permite ver equipos o ubicaciones de otra organización (o de un
+dominio que no alcanzas), o mandarle órdenes a un equipo ajeno, dilo en la
+primera línea.
 
 No abras un issue público para eso. Para todo lo demás, los issues son el sitio.
 
@@ -16,6 +17,14 @@ No abras un issue público para eso. Para todo lo demás, los issues son el siti
 | `dtd_` | Credencial de un equipo | Reportar y contestar las órdenes de ESE equipo |
 | `dtk_` | Llave de API | Lo que digan sus permisos: `leer`, `editar`, `ordenar`, `admin` |
 | JWT | Sesión del panel | Según el rol: `admin`, `editor`, `consulta` |
+
+Una persona o una llave pueden quedar limitadas a unos **dominios** de la
+organización: entonces un equipo de otro dominio, con su historial, sus
+alertas y sus zonas, es para ellas un 404. El filtro va en cada consulta del
+panel y el alcance se lee de la base en cada petición, nunca del cuerpo ni del
+JWT. Administrar (personas, llaves, dominios) es de toda la organización: una
+sesión limitada nunca es `admin`, y la base lo impide también con una
+restricción.
 
 **Un código de alta se trata como semipúblico.** Va en un QR pegado en la
 pared o compilado dentro de una app, y una app se puede abrir. Por eso no lee
@@ -33,8 +42,8 @@ de valer.
 Lo que el equipo manda: modelo, ANDROID_ID, batería, red y nombre de la red
 Wi-Fi, espacio libre, la lista de apps instaladas, la ubicación si la
 organización la pide, y el `contexto` que ponga cada app (quién tiene la
-sesión, en qué almacén). Lo ven las personas y llaves de esa organización,
-nadie más.
+sesión, en qué almacén). Lo ven las personas y llaves de esa organización que
+alcanzan su dominio, nadie más.
 
 El `contexto` lo decide la app: no le pongas nada que no quieras que vea quien
 administra el hub.

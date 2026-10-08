@@ -22,8 +22,8 @@ Hay dos lados:
 |---|---|---|---|
 | `dta_` | Código de alta | Un QR en la pared, una app nuestra compilada | Dar de alta equipos en UNA organización. Nada más. |
 | `dtd_` | Credencial del equipo | El equipo, después del alta | Reportar y recibir órdenes de ESE equipo |
-| `dtk_` | Llave de API | Un script, un ERP | Lo que digan sus permisos: `leer`, `editar`, `ordenar`, `admin` |
-| JWT | Sesión de persona | El panel | Según el rol: `admin` todo; `editor` lee, edita y ordena; `consulta` solo lee |
+| `dtk_` | Llave de API | Un script, un ERP | Lo que digan sus permisos: `leer`, `editar`, `ordenar`, `admin`; y, si se limita, solo en sus dominios |
+| JWT | Sesión de persona | El panel | Según el rol: `admin` todo; `editor` lee, edita y ordena; `consulta` solo lee; y, si se limita, solo en sus dominios |
 
 Todas viajan en `authorization: Bearer ...`. Del secreto se guarda solo el
 hash: se enseña una vez, al crearlo.
@@ -36,6 +36,41 @@ sirve para dar de alta, y cada código tiene tope de usos y vencimiento. Un
 equipo dado de alta con un código robado aparece en el panel como cualquier
 otro, y se borra. Un código se puede anular sin tocar los equipos que ya entraron
 con él.
+
+## Dominios
+
+Un **dominio** agrupa equipos dentro de la organización: una empresa a la que
+le das servicio, un almacén, una sucursal. Cada equipo está en uno, y entra en
+el del código de alta con que se dio de alta. Toda organización tiene el
+dominio **General** (slug `general`), donde cae lo que no tiene otro; quien no
+necesite la separación se queda con ese.
+
+A una persona del panel o a una llave de API se le puede **limitar a uno o
+varios dominios** (`dominios: [...]`; vacío = toda la organización). Entonces
+solo ve y maneja los equipos de esos dominios, con sus códigos de alta, zonas,
+reglas y alertas: un equipo de otro dominio, para ella, no existe (404). Así el
+encargado de un cliente ve lo suyo y el administrador, todo.
+
+* Administrar (personas, llaves, dominios, la organización) es de toda la
+  organización: una persona limitada es `editor` o `consulta`, y una llave
+  limitada no lleva `admin` (`400 admin_sin_dominios`).
+* Lo que crea una sesión limitada cae en su dominio. Si alcanza varios, tiene
+  que decir cuál (`400 falta_dominio`); uno que no alcanza es
+  `400 dominio_invalido`.
+* Una zona o una regla **sin dominio** es de toda la organización: la ve
+  cualquiera (aplica también a sus equipos), pero solo la toca quien alcanza
+  toda la organización.
+* El dominio y el rol se leen de la base en cada petición: quitárselo a alguien
+  vale en el acto, no cuando venza su sesión.
+
+Donde se pide un dominio se acepta su `id` o su `slug`.
+
+| | |
+|---|---|
+| `GET /v1/dominios` | Los que la sesión alcanza, con cuántos equipos (no retirados) tiene cada uno. |
+| `POST /v1/dominios` | `{nombre, slug?, descripcion?}`. Sin `slug`, sale del nombre. Permiso `admin`. |
+| `PATCH /v1/dominios/:id` | `{nombre?, descripcion?}`. El slug no cambia: es lo que tiene escrito un script. Permiso `admin`. |
+| `DELETE /v1/dominios/:id` | Solo uno vacío: con equipos, códigos de alta vigentes, personas o llaves es `409 dominio_en_uso` (el mensaje dice qué le queda); el General, `409 dominio_general`. Sus zonas y reglas se van con él. Permiso `admin`. |
 
 ## Un equipo es uno solo
 
@@ -169,11 +204,10 @@ zonas, reglas y códigos de alta, `ordenar` para mandarle órdenes a un equipo y
 
 | | |
 |---|---|
-| `GET /v1/resumen` | Cuántos equipos, conectados, perdidos, sin contacto en 24 h y alertas abiertas. |
-| `GET /v1/grupos` | Los grupos que hay y cuántos equipos tiene cada uno. |
-| `GET /v1/equipos` | El inventario. Filtros: `q` (nombre, etiqueta, serie, modelo, asignado a), `grupo`, `estado`, `conectado=1/0`, `alerta=1`, `sin_contacto=1` (más de 24 h sin contacto, la misma cuenta del resumen), `retirados=1`. Cada uno con su último reporte resumido y sus fuentes. |
+| `GET /v1/resumen` | Cuántos equipos, conectados, perdidos, sin contacto en 24 h y alertas abiertas (de los dominios que alcanzas). |
+| `GET /v1/equipos` | El inventario. Filtros: `q` (nombre, etiqueta, serie, modelo, asignado a), `dominio`, `estado`, `conectado=1/0`, `alerta=1`, `sin_contacto=1` (más de 24 h sin contacto, la misma cuenta del resumen), `retirados=1`. Cada uno con su `dominio` (id) y `dominio_nombre`, su último reporte resumido y sus fuentes. |
 | `GET /v1/equipos/:id` | Ficha: datos, fuentes con su contexto, último reporte, apps instaladas, alertas abiertas. |
-| `PATCH /v1/equipos/:id` | `nombre`, `etiqueta` (número de activo), `serie`, `grupo`, `asignado_a`, `notas`, `estado` (`activo`, `guardado`, `perdido`, `retirado`). |
+| `PATCH /v1/equipos/:id` | `nombre`, `etiqueta` (número de activo), `serie`, `dominio`, `asignado_a`, `notas`, `estado` (`activo`, `guardado`, `perdido`, `retirado`). Cambiarlo de dominio cierra las alertas de reglas del dominio que deja. |
 | `GET /v1/equipos/:id/recorrido` | Puntos de ubicación entre `desde` y `hasta` (fechas ISO; por defecto, las últimas 24 horas). |
 | `GET /v1/equipos/:id/reportes` | El historial completo entre `desde` y `hasta` (por defecto, las últimas 24 horas), hasta `limite` filas. |
 | `POST /v1/equipos/:id/ordenes` | `{tipo, datos, vence_min?}` (por defecto vence en 60 min). Permiso `ordenar`. |
@@ -188,17 +222,17 @@ equipo deja de contar para las alertas. Borrar es para lo que entró por error.
 
 | | |
 |---|---|
-| `GET /v1/altas` | Los códigos, con cuántos equipos entraron con cada uno. |
-| `POST /v1/altas` | `{nombre, grupo?, usos_max?, vence_dias?}` (o `vence` como fecha ISO). Devuelve el código UNA vez en `codigo`, y en `qr` el texto que va en el código QR: `devicetrack://alta?hub=<tu hub>&codigo=<código>`. Los equipos que entren con él caen en ese `grupo`. |
+| `GET /v1/altas` | Los códigos, con su dominio y cuántos equipos entraron con cada uno. |
+| `POST /v1/altas` | `{nombre, dominio?, usos_max?, vence_dias?}` (o `vence` como fecha ISO). Devuelve el código UNA vez en `codigo`, y en `qr` el texto que va en el código QR: `devicetrack://alta?hub=<tu hub>&codigo=<código>`. Los equipos NUEVOS que entren con él caen en su `dominio` (sin él: el General, o el único que alcances). Uno que ya existía y se da de alta otra vez no cambia de dominio. |
 | `DELETE /v1/altas/:id` | Lo anula. Los equipos que ya entraron siguen. |
 
 ### Zonas y alertas
 
 | | |
 |---|---|
-| `GET/POST/PATCH/DELETE /v1/zonas` | Una zona es un círculo: `{nombre, lat, lng, radio_m}`. El almacén, la sucursal. |
-| `GET/POST/PATCH/DELETE /v1/reglas` | Qué vigilar, para todos o para un `grupo`: `{tipo, nombre?, grupo?, parametros, activa?}`. El `PATCH` cambia solo lo que trae (`{activa: false}` la apaga y deja lo demás); el tipo no se cambia. Si cambian el grupo, los parámetros o si está activa, sus alertas abiertas se cierran. |
-| `GET /v1/alertas` | Las alertas abiertas (y las cerradas, con `todas=1`). |
+| `GET/POST/PATCH/DELETE /v1/zonas` | Una zona es un círculo: `{nombre, lat, lng, radio_m, dominio?}`. El almacén, la sucursal. Sin `dominio` es de toda la organización. |
+| `GET/POST/PATCH/DELETE /v1/reglas` | Qué vigilar, para todos o para un dominio: `{tipo, nombre?, dominio?, parametros, activa?}`. Sin `dominio` vigila a todos los equipos de la organización. El `PATCH` cambia solo lo que trae (`{activa: false}` la apaga y deja lo demás); el tipo no se cambia. Si cambian el dominio, los parámetros o si está activa, sus alertas abiertas se cierran. Una regla `fuera_de_zona` usa una zona de toda la organización o de su mismo dominio. |
+| `GET /v1/alertas` | Las alertas abiertas (y las cerradas, con `todas=1`), con el `dominio` y `dominio_nombre` del equipo. |
 | `POST /v1/alertas/:id/cerrar` | La cierra a mano, con una nota. |
 
 Tipos de regla:
@@ -211,7 +245,7 @@ Tipos de regla:
 | `apagado` | — | Avisa que se apaga | Vuelve a encender |
 
 Cada regla avisa en el panel y, si la organización lo configura, por
-**webhook**: un POST con la alerta, el equipo y su última posición, para que el
+**webhook**: un POST con la alerta, el equipo (con su `dominio`: `{id, nombre, slug}`) y su última posición, para que el
 sistema de cada quien haga lo que quiera (un correo, un mensaje, un ticket).
 Va firmado: `X-Device-Track-Firma: sha256=<HMAC-SHA256 del cuerpo con el
 secreto>`, y `X-Device-Track-Evento` dice `alerta_abierta`, `alerta_cerrada` o
@@ -224,7 +258,11 @@ evaluación la vuelve a abrir.
 ### Organización, personas y llaves
 
 Igual que apk-server: `POST /v1/auth/login`, `/v1/usuarios` (con invitación por
-enlace de un solo uso; `PATCH /v1/usuarios/:id` cambia el rol) y `/v1/llaves`.
+enlace de un solo uso; `PATCH /v1/usuarios/:id` cambia `rol`, `nombre` o
+`dominios`, solo lo que venga) y `/v1/llaves`. Personas y llaves llevan
+`dominios: [...]` (ids o slugs; vacío = toda la organización). `GET /v1/yo`
+dice los dominios de quien pregunta: `dominios: [{id, nombre, slug}]`, vacío si
+alcanza toda la organización.
 
 | | |
 |---|---|

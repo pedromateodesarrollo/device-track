@@ -1,7 +1,7 @@
 <script setup>
 import { ref, reactive, computed, onMounted, onUnmounted, watch, nextTick } from 'vue'
 import {
-  api, consulta, puede, hace, fecha, hora, bytes, distancia, hoyIso,
+  api, consulta, cargaDominios, puede, hace, fecha, hora, bytes, distancia, hoyIso,
   estados, redes, motivos, estadosOrden, tiposOrden, tiposRegla, detalleAlerta,
 } from '../api.js'
 import { creaMapa, circuloZona, colores, esc, panelEncima, L } from '../mapa.js'
@@ -17,9 +17,23 @@ const esAdmin = computed(() => props.yo?.rol === 'admin')
 
 // ------------------------------------------------------------------ carga
 
-const ficha = reactive({ nombre: '', etiqueta: '', serie: '', grupo: '', asignado_a: '', notas: '', estado: 'activo' })
-const grupos = ref([])
+const ficha = reactive({ nombre: '', etiqueta: '', serie: '', dominio: '', asignado_a: '', notas: '', estado: 'activo' })
+const dominios = ref([])
 const zonas = ref([])
+
+// A dónde se puede mover: los dominios que alcanza la sesión. El suyo va
+// siempre, aunque la lista no haya llegado. Con uno solo no hay a dónde
+// moverlo, y la ficha no lo menciona.
+const opcionesDominio = computed(() => {
+  const l = [...dominios.value]
+  if (e.value?.dominio != null && !l.some((d) => d.id === e.value.dominio)) l.unshift({ id: e.value.dominio, nombre: e.value.dominio_nombre })
+  return l
+})
+const variosDominios = computed(() => opcionesDominio.value.length > 1)
+const nombreDominio = (id) => opcionesDominio.value.find((d) => d.id === id)?.nombre || ''
+
+// Las zonas que le tocan: las de toda la organización y las de su dominio.
+const zonasDelEquipo = computed(() => zonas.value.filter((z) => z.dominio == null || z.dominio === e.value?.dominio))
 
 async function carga() {
   try {
@@ -35,7 +49,7 @@ async function carga() {
 onMounted(async () => {
   await carga()
   if (!e.value) return
-  api.get('/v1/grupos').then((d) => (grupos.value = d.grupos)).catch(() => {})
+  cargaDominios().then((d) => (dominios.value = d)).catch(() => {})
   api.get('/v1/zonas').then((d) => { zonas.value = d.zonas; pintaZonas() }).catch(() => {})
   await nextTick()
   montaMapa()
@@ -145,10 +159,12 @@ function pintaUltima() {
 function pintaZonas() {
   if (!capaZonas) return
   capaZonas.clearLayers()
-  for (const z of zonas.value) {
+  for (const z of zonasDelEquipo.value) {
     circuloZona(z, { interactive: false }).addTo(capaZonas)
   }
 }
+// Si lo mueven de dominio, cambian las zonas que le tocan.
+watch(zonasDelEquipo, pintaZonas)
 
 // -------------------------------------------------------------- recorrido
 
@@ -365,8 +381,8 @@ const apps = computed(() => e.value?.apps || [])
       <div>
         <h2 style="margin: 0">{{ e.nombre }}</h2>
         <div class="apagado" style="font-size: 14px">
-          {{ [e.etiqueta, e.modelo, e.grupo].filter(Boolean).join(' · ') }}
-          <template v-if="!e.etiqueta && !e.modelo && !e.grupo">Equipo {{ e.id }}</template>
+          {{ [e.etiqueta, e.modelo, variosDominios && e.dominio_nombre].filter(Boolean).join(' · ') }}
+          <template v-if="!e.etiqueta && !e.modelo && !variosDominios">Equipo {{ e.id }}</template>
         </div>
       </div>
       <span class="estado-equipo" :class="e.estado">{{ estados[e.estado] }}</span>
@@ -437,10 +453,11 @@ const apps = computed(() => e.value?.apps || [])
           <div class="campo"><label>Nombre</label><input v-model="ficha.nombre" :disabled="!puedeEditar" maxlength="200" required /></div>
           <div class="campo"><label>Etiqueta <span class="apagado">(número de activo)</span></label><input v-model="ficha.etiqueta" :disabled="!puedeEditar" maxlength="200" /></div>
           <div class="campo"><label>Serie</label><input v-model="ficha.serie" :disabled="!puedeEditar" maxlength="200" /></div>
-          <div class="campo">
-            <label>Grupo</label>
-            <input v-model="ficha.grupo" :disabled="!puedeEditar" list="grupos-equipo" maxlength="200" placeholder="Almacén, Ruta norte…" />
-            <datalist id="grupos-equipo"><option v-for="g in grupos" :key="g.grupo" :value="g.grupo" /></datalist>
+          <div v-if="variosDominios" class="campo">
+            <label>Dominio</label>
+            <select v-model="ficha.dominio" :disabled="!puedeEditar">
+              <option v-for="d in opcionesDominio" :key="d.id" :value="d.id">{{ d.nombre }}</option>
+            </select>
           </div>
           <div class="campo"><label>Asignado a</label><input v-model="ficha.asignado_a" :disabled="!puedeEditar" maxlength="200" /></div>
           <div class="campo">
@@ -454,6 +471,10 @@ const apps = computed(() => e.value?.apps || [])
             <textarea v-model="ficha.notas" :disabled="!puedeEditar" maxlength="2000" rows="3"></textarea>
           </div>
         </form>
+        <p v-if="puedeEditar && ficha.dominio !== (e.dominio ?? '')" class="apagado chico">
+          Pasa a «{{ nombreDominio(ficha.dominio) }}»: desde ahí lo ven quienes alcanzan ese dominio, y lo
+          vigilan las reglas de ese dominio y las de toda la organización.
+        </p>
         <p v-if="puedeEditar && (ficha.estado === 'guardado' || ficha.estado === 'retirado') && ficha.estado !== e.estado" class="apagado chico">
           {{ ficha.estado === 'guardado' ? 'Guardado' : 'Retirado' }}: deja de vigilarse y sus alertas abiertas se cierran.
         </p>

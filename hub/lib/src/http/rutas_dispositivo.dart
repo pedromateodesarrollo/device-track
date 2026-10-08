@@ -51,7 +51,7 @@ void registraRutasDispositivo(Servidor s, Ordenes ordenes, Alertas alertas) {
       // `for update`: dos equipos dando de alta a la vez con un código de un
       // solo uso no pueden entrar los dos.
       final alta = await tx.fila(
-        '''select a.id, a.org, a.clave_hash, a.grupo, a.usos, a.usos_max, a.vence, a.anulada,
+        '''select a.id, a.org, a.clave_hash, a.dominio, a.usos, a.usos_max, a.vence, a.anulada,
                   o.intervalo_s, o.ubicacion
              from dt.alta a join dt.org o on o.id = a.org
             where a.prefijo = @p for update of a''',
@@ -92,7 +92,7 @@ void registraRutasDispositivo(Servidor s, Ordenes ordenes, Alertas alertas) {
         final sugerido = _texto(eq['nombre'], 100);
         final corto = huella.length > 4 ? huella.substring(huella.length - 4) : huella;
         equipo = await tx.fila(
-          '''insert into dt.equipo (org, nombre, serie, huella, modelo, fabricante, android, grupo, alta)
+          '''insert into dt.equipo (org, nombre, serie, huella, modelo, fabricante, android, dominio, alta)
              values (@o, @n, @s, @h, @m, @f, @a, @g, @al)
              returning id, nombre''',
           {
@@ -103,13 +103,13 @@ void registraRutasDispositivo(Servidor s, Ordenes ordenes, Alertas alertas) {
             'm': modelo,
             'f': fabricante,
             'a': android,
-            'g': alta['grupo'],
+            'g': alta['dominio'],
             'al': alta['id'],
           },
         );
       } else {
         // Lo que el equipo dice de sí se actualiza; lo que escribió una
-        // persona (nombre, grupo, etiqueta) no se toca. Un equipo retirado
+        // persona (nombre, dominio, etiqueta) no se toca. Un equipo retirado
         // que vuelve a darse de alta es que lo volvieron a poner en uso.
         await tx.ejecuta(
           '''update dt.equipo

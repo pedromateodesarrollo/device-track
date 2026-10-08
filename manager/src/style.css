@@ -445,6 +445,10 @@ table.compacta th, table.compacta td { padding: 6px 8px; }
 
 .chico-select { width: auto; padding: 5px 8px; font-size: 14px; }
 
+/* ---------------------------------------------------------------- dominios */
+/* Las casillas para limitar a una persona o una llave a unos dominios. */
+.casillas-dominios { display: flex; flex-wrap: wrap; gap: 6px 18px; }
+
 /* ---------------------------------------------------------------- leaflet */
 .leaflet-container { font: inherit; font-size: 13px; }
 .leaflet-popup-content { margin: 12px 14px; line-height: 1.5; }

@@ -12,6 +12,7 @@ import 'src/config.dart';
 import 'src/db.dart';
 import 'src/http/rutas_auth.dart';
 import 'src/http/rutas_dispositivo.dart';
+import 'src/http/rutas_dominios.dart';
 import 'src/http/rutas_llaves.dart';
 import 'src/http/rutas_panel.dart';
 import 'src/http/servidor.dart';
@@ -60,6 +61,7 @@ class Hub {
     servidor.upgrades.add(canal.upgrade);
     registraRutasAuth(servidor);
     registraRutasLlaves(servidor);
+    registraRutasDominios(servidor);
     registraRutasDispositivo(servidor, ordenes, alertas);
     registraRutasPanel(servidor, canal, ordenes, alertas);
 

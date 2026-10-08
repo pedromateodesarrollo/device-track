@@ -54,23 +54,35 @@ void main() {
     }
   }
 
-  Future<String> persona(String correo, String rol) async {
+  Future<String> persona(String correo, String rol, {List<int> dominios = const []}) async {
     await hub.bd.ejecuta(
-      '''insert into dt.usuario (org, correo, clave_hash, nombre, rol)
-         values (@o, @c, @h, @c, @r)''',
-      {'o': org, 'c': correo, 'h': Seguridad.hashClave('clave-de-prueba', iteraciones: 1000), 'r': rol},
+      '''insert into dt.usuario (org, correo, clave_hash, nombre, rol, dominios)
+         values (@o, @c, @h, @c, @r, @d)''',
+      {
+        'o': org,
+        'c': correo,
+        'h': Seguridad.hashClave('clave-de-prueba', iteraciones: 1000),
+        'r': rol,
+        'd': dominios,
+      },
     );
     final (st, d) = await pide('POST', '/v1/auth/login', json: {'correo': correo, 'clave': 'clave-de-prueba'});
     expect(st, 200, reason: '$d');
     return d['token'] as String;
   }
 
-  Future<String> codigo({int? usos, String grupo = ''}) async {
+  Future<String> codigo({int? usos, Object? dominio, String? token}) async {
     final (st, d) = await pide('POST', '/v1/altas',
-        json: {'nombre': 'Terminales', 'grupo': grupo, 'usos_max': ?usos}, token: admin);
+        json: {'nombre': 'Terminales', 'dominio': ?dominio, 'usos_max': ?usos}, token: token ?? admin);
     expect(st, 201, reason: '$d');
     expect(d['qr'], startsWith('devicetrack://alta?hub='));
     return d['codigo'] as String;
+  }
+
+  Future<Map<String, dynamic>> dominio(String nombre) async {
+    final (st, d) = await pide('POST', '/v1/dominios', json: {'nombre': nombre}, token: admin);
+    expect(st, 201, reason: '$d');
+    return d;
   }
 
   Future<Map<String, dynamic>> alta(String codigo, String huella,
@@ -110,7 +122,9 @@ void main() {
   tearDownAll(() async => hub.detiene());
 
   test('alta: el agente y una app en el mismo teléfono son un solo equipo', () async {
-    final c = await codigo(grupo: 'Almacén A13');
+    final almacen = await dominio('Almacén A13');
+    expect(almacen['slug'], 'almacen-a13');
+    final c = await codigo(dominio: 'almacen-a13');
     final a = await alta(c, 'huella-0001');
     expect((a['credencial'] as String), startsWith('dtd_'));
     expect(a['config']['intervalo_s'], 600);
@@ -119,7 +133,8 @@ void main() {
 
     final (st, d) = await pide('GET', '/v1/equipos/${a['equipo']['id']}', token: admin);
     expect(st, 200);
-    expect(d['grupo'], 'Almacén A13');
+    expect(d['dominio'], almacen['id']);
+    expect(d['dominio_nombre'], 'Almacén A13');
     expect((d['fuentes'] as List).map((f) => f['paquete']).toSet(),
         {'com.chalonasoft.devicetrack', 'com.chalona.wms_app'});
 
@@ -197,7 +212,8 @@ void main() {
   });
 
   test('alertas: batería baja, fuera de zona, apagado y sin reporte', () async {
-    final a = await alta(await codigo(grupo: 'Vigilados'), 'huella-alertas');
+    final vigilados = await dominio('Vigilados');
+    final a = await alta(await codigo(dominio: vigilados['id']), 'huella-alertas');
     final cred = a['credencial'] as String;
     final id = a['equipo']['id'];
 
@@ -206,9 +222,9 @@ void main() {
     expect(st, 201, reason: '$z');
     for (final regla in [
       {'tipo': 'bateria_baja', 'parametros': {'porcentaje': 20}},
-      {'tipo': 'fuera_de_zona', 'parametros': {'zona': z['id']}, 'grupo': 'Vigilados'},
+      {'tipo': 'fuera_de_zona', 'parametros': {'zona': z['id']}, 'dominio': 'vigilados'},
       {'tipo': 'apagado'},
-      {'tipo': 'sin_reporte', 'parametros': {'minutos': 30}, 'grupo': 'Vigilados'},
+      {'tipo': 'sin_reporte', 'parametros': {'minutos': 30}, 'dominio': 'vigilados'},
     ]) {
       final (st, d) = await pide('POST', '/v1/reglas', json: regla, token: admin);
       expect(st, 201, reason: '$d');
@@ -359,15 +375,17 @@ void main() {
   });
 
   test('PATCH de una regla cambia solo lo que viene', () async {
+    final g1 = await dominio('G1');
     var (st, r) = await pide('POST', '/v1/reglas',
-        json: {'tipo': 'bateria_baja', 'nombre': 'Batería', 'grupo': 'G1', 'parametros': {'porcentaje': 25}},
+        json: {'tipo': 'bateria_baja', 'nombre': 'Batería', 'dominio': g1['id'], 'parametros': {'porcentaje': 25}},
         token: admin);
     expect(st, 201);
     (st, r) = await pide('PATCH', '/v1/reglas/${r['id']}', json: {'activa': false}, token: admin);
     expect(st, 200, reason: '$r');
     expect(r['activa'], isFalse);
     expect(r['nombre'], 'Batería');
-    expect(r['grupo'], 'G1');
+    expect(r['dominio'], g1['id']);
+    expect(r['dominio_nombre'], 'G1');
     expect(r['parametros']['porcentaje'], 25);
     (st, r) = await pide('PATCH', '/v1/reglas/${r['id']}', json: {'nombre': 'Otra'}, token: admin);
     expect(r['activa'], isFalse);
@@ -420,6 +438,7 @@ void main() {
     expect(evento, 'alerta_abierta');
     expect(firma, 'sha256=${Hmac(sha256, utf8.encode(secreto)).convert(utf8.encode(cuerpo))}');
     expect(jsonDecode(cuerpo)['equipo']['id'], a['equipo']['id']);
+    expect(jsonDecode(cuerpo)['equipo']['dominio']['slug'], 'general');
     await srv.close(force: true);
   });
 
@@ -432,5 +451,156 @@ void main() {
     final (_, d) = await pide('GET', '/v1/equipos/${a['equipo']['id']}', token: admin);
     expect(d['lat'], isNull);
     await pide('PATCH', '/v1/org', json: {'ubicacion': true}, token: admin);
+  });
+
+  test('dominios: quien está limitado a uno ve y maneja solo lo suyo', () async {
+    final duralon = await dominio('Duralon');
+    final jf = await dominio('JF');
+    final d1 = await alta(await codigo(dominio: 'duralon'), 'huella-duralon-1');
+    final j1 = await alta(await codigo(dominio: 'jf'), 'huella-jf-1');
+    final idD = d1['equipo']['id'];
+    final idJ = j1['equipo']['id'];
+    final encargado = await persona('encargado@duralon.do', 'editor', dominios: [duralon['id'] as int]);
+
+    // Solo ve lo suyo, y lo ajeno no existe.
+    var (st, d) = await pide('GET', '/v1/equipos', token: encargado);
+    expect((d['equipos'] as List).map((e) => e['id']).toList(), [idD]);
+    (st, d) = await pide('GET', '/v1/resumen', token: encargado);
+    expect(d['equipos'], 1);
+    (st, d) = await pide('GET', '/v1/dominios', token: encargado);
+    expect((d['dominios'] as List).map((x) => x['slug']).toList(), ['duralon']);
+    (st, d) = await pide('GET', '/v1/yo', token: encargado);
+    expect((d['dominios'] as List).single['nombre'], 'Duralon');
+    (st, d) = await pide('GET', '/v1/yo', token: admin);
+    expect(d['dominios'], isEmpty);
+    for (final (metodo, ruta, json) in [
+      ('GET', '/v1/equipos/$idJ', null),
+      ('GET', '/v1/equipos/$idJ/recorrido', null),
+      ('GET', '/v1/equipos/$idJ/reportes', null),
+      ('GET', '/v1/equipos/$idJ/ordenes', null),
+      ('PATCH', '/v1/equipos/$idJ', {'nombre': 'mío'}),
+      ('POST', '/v1/equipos/$idJ/ordenes', {'tipo': 'sonar'}),
+      ('POST', '/v1/equipos/$idD/unir', {'con': idJ}),
+    ]) {
+      (st, d) = await pide(metodo, ruta, json: json, token: encargado);
+      expect(st, 404, reason: '$metodo $ruta → $d');
+    }
+    (st, d) = await pide('GET', '/v1/equipos?dominio=jf', token: encargado);
+    expect(st, 400);
+    expect(d['error'], 'dominio_invalido');
+
+    // Lo que crea cae en su dominio, y no puede sacar un equipo de él.
+    (st, d) = await pide('POST', '/v1/altas', json: {'nombre': 'Mías'}, token: encargado);
+    expect(st, 201, reason: '$d');
+    expect(d['dominio'], duralon['id']);
+    (st, d) = await pide('POST', '/v1/altas', json: {'nombre': 'Ajenas', 'dominio': 'jf'}, token: encargado);
+    expect(d['error'], 'dominio_invalido');
+    (st, d) = await pide('PATCH', '/v1/equipos/$idD', json: {'dominio': 'jf'}, token: encargado);
+    expect(d['error'], 'dominio_invalido');
+    (st, d) = await pide('GET', '/v1/altas', token: encargado);
+    expect((d['altas'] as List).every((a) => a['dominio'] == duralon['id']), isTrue);
+
+    // Administrar no es para quien está limitado.
+    (st, d) = await pide('GET', '/v1/usuarios', token: encargado);
+    expect(st, 403);
+    (st, d) = await pide('POST', '/v1/dominios', json: {'nombre': 'Otro'}, token: encargado);
+    expect(st, 403);
+
+    // Zonas: ve las de toda la organización, no las de otro dominio; solo
+    // toca las suyas.
+    final (_, zOrg) = await pide('POST', '/v1/zonas',
+        json: {'nombre': 'Ciudad', 'lat': 18.5, 'lng': -69.9, 'radio_m': 50000}, token: admin);
+    expect(zOrg['dominio'], isNull);
+    final (_, zJf) = await pide('POST', '/v1/zonas',
+        json: {'nombre': 'Almacén JF', 'lat': 18.4, 'lng': -69.8, 'radio_m': 300, 'dominio': 'jf'}, token: admin);
+    (st, d) = await pide('GET', '/v1/zonas', token: encargado);
+    final ids = (d['zonas'] as List).map((z) => z['id']).toSet();
+    expect(ids.contains(zOrg['id']), isTrue);
+    expect(ids.contains(zJf['id']), isFalse);
+    (st, d) = await pide('PATCH', '/v1/zonas/${zOrg['id']}',
+        json: {'nombre': 'x', 'lat': 18.5, 'lng': -69.9, 'radio_m': 10}, token: encargado);
+    expect(st, 404);
+    (st, d) = await pide('POST', '/v1/zonas',
+        json: {'nombre': 'Planta', 'lat': 18.45, 'lng': -69.95, 'radio_m': 400}, token: encargado);
+    expect(st, 201, reason: '$d');
+    expect(d['dominio'], duralon['id']);
+
+    // Una regla suya no vigila una zona de otro dominio.
+    (st, d) = await pide('POST', '/v1/reglas',
+        json: {'tipo': 'fuera_de_zona', 'parametros': {'zona': zJf['id']}}, token: encargado);
+    expect(d['error'], 'zona_invalida');
+    (st, d) = await pide('POST', '/v1/reglas',
+        json: {'tipo': 'fuera_de_zona', 'parametros': {'zona': zOrg['id']}, 'activa': false}, token: encargado);
+    expect(st, 201, reason: '$d');
+    expect(d['dominio'], duralon['id']);
+    (st, d) = await pide('GET', '/v1/reglas', token: encargado);
+    expect((d['reglas'] as List).every((r) => r['dominio'] == null || r['dominio'] == duralon['id']), isTrue);
+
+    // Alertas: las de un equipo ajeno ni se ven ni se cierran. (La regla de
+    // batería baja de toda la organización viene de la prueba de alertas.)
+    for (final cred in [d1['credencial'], j1['credencial']]) {
+      await pide('POST', '/v1/reporte', json: {'bateria': 5, 'cargando': false}, token: cred as String);
+    }
+    await Future<void>.delayed(const Duration(milliseconds: 300));
+    (st, d) = await pide('GET', '/v1/alertas', token: encargado);
+    expect((d['alertas'] as List).map((a) => a['equipo']).toSet(), {idD});
+    expect((d['alertas'] as List).first['dominio_nombre'], 'Duralon');
+    final (_, todas) = await pide('GET', '/v1/alertas?equipo=$idJ', token: admin);
+    final ajena = (todas['alertas'] as List).first['id'];
+    (st, d) = await pide('POST', '/v1/alertas/$ajena/cerrar', json: {}, token: encargado);
+    expect(st, 404);
+
+    // Una llave limitada a JF ve solo lo de JF; admin no se limita.
+    (st, d) = await pide('POST', '/v1/llaves',
+        json: {'nombre': 'ERP de JF', 'permisos': ['leer'], 'dominios': ['jf']}, token: admin);
+    expect(st, 201, reason: '$d');
+    expect(d['dominios'], [jf['id']]);
+    (st, d) = await pide('GET', '/v1/equipos', token: d['llave'] as String);
+    expect((d['equipos'] as List).map((e) => e['id']).toList(), [idJ]);
+    (st, d) = await pide('POST', '/v1/llaves',
+        json: {'nombre': 'mala', 'permisos': ['admin'], 'dominios': ['jf']}, token: admin);
+    expect(d['error'], 'admin_sin_dominios');
+    (st, d) = await pide('POST', '/v1/usuarios',
+        json: {'correo': 'jefe@jf.do', 'rol': 'admin', 'dominios': ['jf']}, token: admin);
+    expect(d['error'], 'admin_sin_dominios');
+    (st, d) = await pide('POST', '/v1/usuarios',
+        json: {'correo': 'jefe@jf.do', 'rol': 'consulta', 'dominios': ['no-existe']}, token: admin);
+    expect(d['error'], 'dominio_invalido');
+
+    // Quitarle el dominio a la persona vale en el acto, sin esperar a que
+    // venza su sesión.
+    final (_, lista) = await pide('GET', '/v1/usuarios', token: admin);
+    final idEncargado = (lista['usuarios'] as List).firstWhere((u) => u['correo'] == 'encargado@duralon.do')['id'];
+    (st, d) = await pide('PATCH', '/v1/usuarios/$idEncargado', json: {'dominios': ['jf']}, token: admin);
+    expect(st, 200, reason: '$d');
+    expect(d['rol'], 'editor');
+    (st, d) = await pide('GET', '/v1/equipos', token: encargado);
+    expect((d['equipos'] as List).map((e) => e['id']).toList(), [idJ]);
+
+    // Borrar: el General nunca; uno con equipos o con gente, tampoco.
+    final (_, doms) = await pide('GET', '/v1/dominios', token: admin);
+    final general = (doms['dominios'] as List).first;
+    expect(general['slug'], 'general');
+    (st, d) = await pide('DELETE', '/v1/dominios/${general['id']}', token: admin);
+    expect(d['error'], 'dominio_general');
+    (st, d) = await pide('DELETE', '/v1/dominios/${jf['id']}', token: admin);
+    expect(st, 409);
+    expect(d['error'], 'dominio_en_uso');
+    expect(d['mensaje'], contains('1 equipo'));
+    final vacio = await dominio('Vacío');
+    (st, _) = await pide('DELETE', '/v1/dominios/${vacio['id']}', token: admin);
+    expect(st, 204);
+
+    // Mover un equipo de dominio cierra las alertas de reglas del dominio
+    // que deja.
+    final (_, rJf) = await pide('POST', '/v1/reglas',
+        json: {'tipo': 'apagado', 'dominio': 'jf'}, token: admin);
+    await pide('POST', '/v1/reporte', json: {'motivo': 'apagando'}, token: j1['credencial'] as String);
+    await Future<void>.delayed(const Duration(milliseconds: 300));
+    (st, d) = await pide('PATCH', '/v1/equipos/$idJ', json: {'dominio': 'duralon'}, token: admin);
+    expect(st, 200, reason: '$d');
+    expect(d['dominio_nombre'], 'Duralon');
+    final (_, despues) = await pide('GET', '/v1/alertas?equipo=$idJ', token: admin);
+    expect((despues['alertas'] as List).where((a) => a['regla'] == rJf['id']), isEmpty);
   });
 }

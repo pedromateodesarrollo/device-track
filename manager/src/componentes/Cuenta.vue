@@ -1,11 +1,11 @@
 <script setup>
 import { ref } from 'vue'
-import { api } from '../api.js'
+import { api, acotado, alcanceTexto } from '../api.js'
 
 const props = defineProps({ yo: Object })
 
 const roles = {
-  admin: 'administrador (todo, incluidas personas, llaves y organización)',
+  admin: 'administrador (todo, incluidas personas, llaves, dominios y organización)',
   editor: 'editor (edita equipos, manda órdenes, reglas y códigos de alta)',
   consulta: 'consulta (solo mira)',
 }
@@ -37,6 +37,10 @@ async function cambia() {
   <div class="cabecera-seccion"><h2>Mi cuenta</h2></div>
   <p class="apagado">{{ props.yo.nombre }} · {{ props.yo.correo }} · {{ props.yo.organizacion }}</p>
   <p class="apagado chico">Tu rol: <strong>{{ roles[props.yo.rol] || props.yo.rol }}</strong></p>
+  <p v-if="acotado(props.yo)" class="apagado chico">
+    Ves solo los equipos de <strong>{{ alcanceTexto(props.yo) }}</strong>, con sus zonas, reglas,
+    alertas y códigos de alta. Para ver más, pídeselo a quien administra.
+  </p>
   <form class="caja" @submit.prevent="cambia">
     <h3 style="margin-top: 18px">Cambiar la clave</h3>
     <label>Clave actual</label>

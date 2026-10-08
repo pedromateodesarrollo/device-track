@@ -1,6 +1,6 @@
 <script setup>
 import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
-import { api, sesion } from '../api.js'
+import { api, sesion, acotado, alcanceTexto } from '../api.js'
 import Resumen from './Resumen.vue'
 import Equipos from './Equipos.vue'
 import EquipoDetalle from './EquipoDetalle.vue'
@@ -9,6 +9,7 @@ import Alertas from './Alertas.vue'
 import Reglas from './Reglas.vue'
 import Altas from './Altas.vue'
 import Organizacion from './Organizacion.vue'
+import Dominios from './Dominios.vue'
 import Usuarios from './Usuarios.vue'
 import Llaves from './Llaves.vue'
 import Cuenta from './Cuenta.vue'
@@ -40,10 +41,13 @@ const secciones = computed(() => [
   ['reglas', 'Reglas y zonas'],
   ['altas', 'Códigos de alta'],
   ...(yo.value?.rol === 'admin'
-    ? [['org', 'Organización'], ['usuarios', 'Usuarios'], ['llaves', 'Llaves de API']]
+    ? [['org', 'Organización'], ['dominios', 'Dominios'], ['usuarios', 'Usuarios'], ['llaves', 'Llaves de API']]
     : []),
   ['cuenta', 'Mi cuenta'],
 ])
+// Una persona limitada a unos dominios lo ve escrito arriba: sabe que mira
+// una parte, no toda la organización.
+const alcance = computed(() => (acotado(yo.value) ? alcanceTexto(yo.value) : ''))
 const tituloActual = computed(() => secciones.value.find(([id]) => id === seccion.value)?.[1] || 'Menú')
 
 async function cuentaAlertas() {
@@ -152,7 +156,9 @@ function sale() {
 
     <main class="contenido">
       <p class="apagado" style="font-size: 14px; margin-bottom: 14px">
-        {{ yo.organizacion }} · {{ yo.correo }} ({{ yo.rol }})
+        {{ yo.organizacion }}<template v-if="alcance">
+          · <span title="Solo ves los equipos de estos dominios">solo {{ alcance }}</span></template>
+        · {{ yo.correo }} ({{ yo.rol }})
       </p>
       <EquipoDetalle v-if="equipo" :key="equipo" :id="equipo" :yo="yo" />
       <Equipos v-else-if="seccion === 'equipos'" :key="JSON.stringify(filtros)" :yo="yo" :filtros="filtros" />
@@ -161,6 +167,7 @@ function sale() {
       <Reglas v-else-if="seccion === 'reglas'" :yo="yo" />
       <Altas v-else-if="seccion === 'altas'" :yo="yo" />
       <Organizacion v-else-if="seccion === 'org'" :yo="yo" />
+      <Dominios v-else-if="seccion === 'dominios'" />
       <Usuarios v-else-if="seccion === 'usuarios'" :yo="yo" />
       <Llaves v-else-if="seccion === 'llaves'" />
       <Cuenta v-else-if="seccion === 'cuenta'" :yo="yo" />

@@ -55,7 +55,7 @@ const diagrama = `  Equipo (agente o app)            Hub                       Q
       <div class="rejilla" style="margin-top: 22px">
         <div class="tarjeta">
           <h3>Un inventario que se llena solo</h3>
-          <p>Cada equipo se da de alta escaneando un QR. Modelo, Android, serie y apps instaladas los dice él; tú le pones nombre, etiqueta, grupo y a quién está asignado.</p>
+          <p>Cada equipo se da de alta escaneando un QR. Modelo, Android, serie y apps instaladas los dice él; tú le pones nombre, etiqueta, a quién está asignado y su dominio: la empresa, el almacén o la sucursal donde va. El encargado de un dominio ve solo sus equipos.</p>
         </div>
         <div class="tarjeta">
           <h3>Dónde está y por dónde anduvo</h3>
@@ -67,7 +67,7 @@ const diagrama = `  Equipo (agente o app)            Hub                       Q
         </div>
         <div class="tarjeta">
           <h3>Alertas que se cierran solas</h3>
-          <p>Sin reporte, batería baja, fuera de zona, apagado. Para todos o por grupo. Se abren en el panel y por webhook a tu sistema, y se cierran cuando el equipo se recupera.</p>
+          <p>Sin reporte, batería baja, fuera de zona, apagado. Para todos o por dominio. Se abren en el panel y por webhook a tu sistema, y se cierran cuando el equipo se recupera.</p>
         </div>
         <div class="tarjeta">
           <h3>Hacer sonar uno perdido</h3>

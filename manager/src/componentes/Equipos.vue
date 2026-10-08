@@ -5,7 +5,7 @@ import { reactive } from 'vue'
 // lista sigue como estaba.
 const recordados = reactive({
   q: '',
-  grupo: '',
+  dominio: '',
   estado: '',
   conectado: '',
   alerta: false,
@@ -15,14 +15,14 @@ const recordados = reactive({
 
 <script setup>
 import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
-import { api, consulta, hace, fecha, estados, redes, colorEquipo } from '../api.js'
+import { api, consulta, cargaDominios, hace, fecha, estados, redes, colorEquipo } from '../api.js'
 import Bateria from './Bateria.vue'
 
 const props = defineProps({ yo: Object, filtros: { type: Object, default: () => ({}) } })
 
 // Un enlace con filtros (desde el resumen) manda sobre lo recordado.
 if (Object.keys(props.filtros).length) {
-  Object.assign(recordados, { q: '', grupo: '', estado: '', conectado: '', alerta: false, retirados: false })
+  Object.assign(recordados, { q: '', dominio: '', estado: '', conectado: '', alerta: false, retirados: false })
   for (const [k, v] of Object.entries(props.filtros)) {
     if (k in recordados) recordados[k] = typeof recordados[k] === 'boolean' ? v === '1' : v
   }
@@ -30,7 +30,10 @@ if (Object.keys(props.filtros).length) {
 const f = recordados
 
 const equipos = ref([])
-const grupos = ref([])
+const dominios = ref([])
+// Con un solo dominio a la vista (la organización no los usa, o la persona
+// está limitada a uno) no hay nada que filtrar ni que distinguir.
+const variosDominios = computed(() => dominios.value.length > 1)
 const error = ref('')
 const cargando = ref(true)
 let espera = null
@@ -40,7 +43,7 @@ async function carga() {
   try {
     const d = await api.get('/v1/equipos' + consulta({
       q: f.q.trim(),
-      grupo: f.grupo,
+      dominio: f.dominio,
       estado: f.estado,
       // «sin contacto 24 h» no es un filtro del hub: se piden los
       // desconectados y se recorta aquí, con la misma regla que el resumen.
@@ -67,7 +70,12 @@ const visibles = computed(() => {
 
 onMounted(async () => {
   carga()
-  try { grupos.value = (await api.get('/v1/grupos')).grupos } catch { /* el filtro queda sin grupos */ }
+  try {
+    dominios.value = await cargaDominios()
+    // Un filtro recordado de un dominio que ya no está (lo borraron, o es de
+    // otra sesión) dejaría la lista vacía sin explicación.
+    if (f.dominio && !dominios.value.some((d) => String(d.id) === String(f.dominio))) f.dominio = ''
+  } catch { /* el filtro queda sin dominios */ }
   reloj = setInterval(carga, 30000)
 })
 onUnmounted(() => clearInterval(reloj))
@@ -77,11 +85,11 @@ watch(() => f.q, () => {
   clearTimeout(espera)
   espera = setTimeout(carga, 300)
 })
-watch(() => [f.grupo, f.estado, f.conectado, f.alerta, f.retirados], carga)
+watch(() => [f.dominio, f.estado, f.conectado, f.alerta, f.retirados], carga)
 
-const hayFiltros = computed(() => f.q || f.grupo || f.estado || f.conectado || f.alerta || f.retirados)
+const hayFiltros = computed(() => f.q || f.dominio || f.estado || f.conectado || f.alerta || f.retirados)
 function limpia() {
-  Object.assign(f, { q: '', grupo: '', estado: '', conectado: '', alerta: false, retirados: false })
+  Object.assign(f, { q: '', dominio: '', estado: '', conectado: '', alerta: false, retirados: false })
 }
 
 const abre = (e) => (location.hash = `#/panel/equipos/${e.id}`)
@@ -99,9 +107,9 @@ const red = (e) => {
 
   <div class="filtros">
     <input v-model="f.q" type="search" placeholder="Buscar por nombre, etiqueta, serie, modelo o persona" class="buscar" />
-    <select v-model="f.grupo" aria-label="Grupo">
-      <option value="">Todos los grupos</option>
-      <option v-for="g in grupos" :key="g.grupo" :value="g.grupo">{{ g.grupo }} ({{ g.equipos }})</option>
+    <select v-if="variosDominios" v-model="f.dominio" aria-label="Dominio">
+      <option value="">Todos los dominios</option>
+      <option v-for="d in dominios" :key="d.id" :value="String(d.id)">{{ d.nombre }} ({{ d.equipos }})</option>
     </select>
     <select v-model="f.estado" aria-label="Estado">
       <option value="">Cualquier estado</option>
@@ -132,7 +140,7 @@ const red = (e) => {
   <table v-if="visibles.length" class="tabla-equipos solo-ancho">
     <thead>
       <tr>
-        <th>Equipo</th><th>Grupo</th><th>Asignado a</th><th>Estado</th>
+        <th>Equipo</th><th v-if="variosDominios">Dominio</th><th>Asignado a</th><th>Estado</th>
         <th>Última vez</th><th>Batería</th><th>Red</th><th>Alertas</th>
       </tr>
     </thead>
@@ -146,7 +154,7 @@ const red = (e) => {
             <span v-if="e.modelo">{{ e.modelo }}</span>
           </div>
         </td>
-        <td>{{ e.grupo }}</td>
+        <td v-if="variosDominios">{{ e.dominio_nombre }}</td>
         <td>{{ e.asignado_a }}</td>
         <td><span class="estado-equipo" :class="e.estado">{{ estados[e.estado] }}</span></td>
         <td :title="fecha(e.ultima_vez)">
@@ -180,7 +188,7 @@ const red = (e) => {
         <span class="estado-equipo" :class="e.estado" style="margin-left: auto">{{ estados[e.estado] }}</span>
       </div>
       <div class="apagado chico">
-        {{ [e.etiqueta, e.grupo, e.asignado_a].filter(Boolean).join(' · ') || e.modelo }}
+        {{ [e.etiqueta, variosDominios && e.dominio_nombre, e.asignado_a].filter(Boolean).join(' · ') || e.modelo }}
       </div>
       <div class="fila-3">
         <span>{{ e.conectado ? 'conectado' : hace(e.ultima_vez) }}</span>

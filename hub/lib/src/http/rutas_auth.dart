@@ -1,7 +1,9 @@
 import '../db.dart';
+import '../dominios.dart';
 import '../limitador.dart';
 import '../log.dart';
 import '../seguridad.dart';
+import 'rutas_dominios.dart';
 import 'servidor.dart';
 
 /// Cuánto vale un enlace de invitación.
@@ -138,9 +140,17 @@ void registraRutasAuth(Servidor s) {
     return Respuesta.ok(_conToken(hecho!, p.config.secretoJwt));
   }, acceso: Acceso.publico);
 
+  // `dominios` vacío = alcanza toda la organización.
   s.ruta('GET', '/v1/yo', (p) async {
+    final dominios = p.s.dominios == null
+        ? const <Map<String, Object?>>[]
+        : await p.bd.filas(
+            '''select id, nombre, slug from dt.dominio
+                where org = @o and ${enDominios(p.s.dominios, 'id')} order by lower(nombre)''',
+            {'o': p.s.org},
+          );
     if (!p.s.esUsuario) {
-      return Respuesta.ok({'org': p.s.org, 'llave': p.s.llave, 'rol': 'api'});
+      return Respuesta.ok({'org': p.s.org, 'llave': p.s.llave, 'rol': 'api', 'dominios': dominios});
     }
     final u = await p.bd.fila(
       '''select u.id, u.correo, u.nombre, u.rol, u.org, o.nombre as organizacion
@@ -148,12 +158,12 @@ void registraRutasAuth(Servidor s) {
           where u.id = @i''',
       {'i': p.s.usuario},
     );
-    return u == null ? Respuesta.falla(404, 'no_encontrado', '') : Respuesta.ok(u);
+    return u == null ? Respuesta.falla(404, 'no_encontrado', '') : Respuesta.ok({...u, 'dominios': dominios});
   });
 
   s.ruta('GET', '/v1/usuarios', (p) async {
     final r = await p.bd.filas(
-      '''select id, correo, nombre, rol, creado, ultimo_acceso,
+      '''select id, correo, nombre, rol, dominios, creado, ultimo_acceso,
                 clave_hash is not null as activo,
                 invitacion_vence
            from dt.usuario where org = @o order by id''',
@@ -173,18 +183,22 @@ void registraRutasAuth(Servidor s) {
     if (!rolesValidos.contains(rol)) {
       return Respuesta.falla(400, 'rol_invalido', 'El rol es admin, editor o consulta');
     }
+    final (dominios, error) = await dominiosDe(p, p.cuerpo['dominios']);
+    if (error != null) return error;
+    if (rol == 'admin' && dominios.isNotEmpty) return _adminSinDominios();
     if (await _correoOcupado(p.bd, correo)) {
       return Respuesta.falla(409, 'correo_en_uso', 'Ese correo ya tiene cuenta');
     }
     final u = await p.bd.fila(
-      '''insert into dt.usuario (org, correo, nombre, rol)
-         values (@o, @c, @n, @r)
-         returning id, correo, nombre, rol, creado''',
+      '''insert into dt.usuario (org, correo, nombre, rol, dominios)
+         values (@o, @c, @n, @r, @d)
+         returning id, correo, nombre, rol, dominios, creado''',
       {
         'o': p.s.org,
         'c': correo,
         'n': p.texto('nombre', porDefecto: correo.split('@').first),
         'r': rol,
+        'd': dominios,
       },
     );
     final token = await nuevaInvitacion(p.bd, u!['id'] as int);
@@ -204,21 +218,34 @@ void registraRutasAuth(Servidor s) {
     return Respuesta.ok({'enlace': enlaceInvitacion(p.urlPublica, token)});
   }, permiso: 'admin');
 
+  // Cambia solo lo que viene: `rol`, `nombre`, `dominios`.
   s.ruta('PATCH', '/v1/usuarios/:id', (p) async {
     final id = p.enteroParam('id');
-    final rol = p.texto('rol');
+    final actual = await p.bd.fila(
+      'select rol, dominios from dt.usuario where id = @i and org = @o',
+      {'i': id, 'o': p.s.org},
+    );
+    if (actual == null) return Respuesta.falla(404, 'no_encontrado', '');
+    final rol = p.cuerpo.containsKey('rol') ? p.texto('rol') : actual['rol'] as String;
     if (!rolesValidos.contains(rol)) {
       return Respuesta.falla(400, 'rol_invalido', 'El rol es admin, editor o consulta');
     }
-    if (id == p.s.usuario && rol != 'admin') {
+    var dominios = [for (final d in actual['dominios'] as List) (d as num).toInt()];
+    if (p.cuerpo.containsKey('dominios')) {
+      final (pedidos, error) = await dominiosDe(p, p.cuerpo['dominios']);
+      if (error != null) return error;
+      dominios = pedidos;
+    }
+    if (id == p.s.usuario && (rol != 'admin' || dominios.isNotEmpty)) {
       return Respuesta.falla(400, 'no_te_bajes',
           'No te quites a ti mismo el rol de administrador: pídeselo a otro admin');
     }
+    if (rol == 'admin' && dominios.isNotEmpty) return _adminSinDominios();
     final u = await p.bd.fila(
-      '''update dt.usuario set rol = @r, nombre = coalesce(nullif(@n, ''), nombre)
+      '''update dt.usuario set rol = @r, dominios = @d, nombre = coalesce(nullif(@n, ''), nombre)
           where id = @i and org = @o
-          returning id, correo, nombre, rol''',
-      {'r': rol, 'n': p.texto('nombre'), 'i': id, 'o': p.s.org},
+          returning id, correo, nombre, rol, dominios''',
+      {'r': rol, 'd': dominios, 'n': p.texto('nombre'), 'i': id, 'o': p.s.org},
     );
     return u == null ? Respuesta.falla(404, 'no_encontrado', '') : Respuesta.ok(u);
   }, permiso: 'admin');
@@ -262,14 +289,22 @@ void registraRutasAuth(Servidor s) {
   }, permiso: 'admin');
 }
 
-/// Crea una organización con un slug libre. Devuelve su id.
+/// Crea una organización con un slug libre y su dominio General. Devuelve
+/// su id.
 Future<int> creaOrg(Bd bd, String nombre) async {
   final org = await bd.fila(
     'insert into dt.org (nombre, slug) values (@n, @s) returning id',
     {'n': nombre, 's': await _slugLibre(bd, nombre)},
   );
-  return org!['id'] as int;
+  final id = org!['id'] as int;
+  await dominioGeneral(bd, id);
+  return id;
 }
+
+/// Administrar es de toda la organización: quien queda limitado a unos
+/// dominios es `editor` o `consulta`.
+Respuesta _adminSinDominios() => Respuesta.falla(400, 'admin_sin_dominios',
+    'Un administrador alcanza toda la organización: para limitarlo a unos dominios, hazlo editor o consulta');
 
 /// Genera el enlace de un solo uso de [usuario] y lo deja guardado (hasheado).
 /// Invalida cualquier enlace anterior de esa persona.

@@ -2,16 +2,20 @@ import 'dart:convert';
 
 import '../alertas.dart';
 import '../db.dart';
+import '../dominios.dart';
 import '../ordenes.dart';
 import '../seguridad.dart';
 import '../ws/canal.dart';
+import 'rutas_dominios.dart';
 import 'servidor.dart';
 
 /// Lo que usa quien administra: el panel, un script, un ERP.
 ///
 /// Toda consulta filtra por la organización de la sesión (`p.s.org`); ninguna
 /// toma un `org` del cuerpo. Un id de equipo de otra organización es, para
-/// esta, un equipo que no existe.
+/// esta, un equipo que no existe. Y dentro de la organización, por los
+/// dominios que la sesión alcanza (`enDominios`): un equipo de otro dominio
+/// tampoco existe para quien no lo alcanza.
 void registraRutasPanel(Servidor s, Canal canal, Ordenes ordenes, Alertas alertas) {
   // ------------------------------------------------------------- equipos
 
@@ -22,25 +26,18 @@ void registraRutasPanel(Servidor s, Canal canal, Ordenes ordenes, Alertas alerta
                 count(*) filter (where estado = 'perdido') as perdidos,
                 count(*) filter (where estado in ('activo', 'perdido') and not conectado
                                    and ultima_vez < now() - interval '24 hours') as sin_contacto_24h,
-                (select count(*) from dt.alerta a where a.org = @o and a.cerrada is null) as alertas
-           from dt.equipo where org = @o''',
+                (select count(*) from dt.alerta a join dt.equipo x on x.id = a.equipo
+                  where a.org = @o and a.cerrada is null
+                    and ${enDominios(p.s.dominios, 'x.dominio')}) as alertas
+           from dt.equipo e where e.org = @o and ${enDominios(p.s.dominios, 'e.dominio')}''',
       {'o': p.s.org},
     );
     return Respuesta.ok(r);
   });
 
-  s.ruta('GET', '/v1/grupos', (p) async {
-    final r = await p.bd.filas(
-      '''select grupo, count(*) as equipos from dt.equipo
-          where org = @o and grupo <> '' group by grupo order by grupo''',
-      {'o': p.s.org},
-    );
-    return Respuesta.ok({'grupos': r});
-  });
-
   s.ruta('GET', '/v1/equipos', (p) async {
     final q = p.consulta;
-    final filtros = <String>['e.org = @o'];
+    final filtros = <String>['e.org = @o', enDominios(p.s.dominios, 'e.dominio')];
     final params = <String, Object?>{'o': p.s.org};
     final texto = (q['q'] ?? '').trim();
     if (texto.isNotEmpty) {
@@ -48,9 +45,11 @@ void registraRutasPanel(Servidor s, Canal canal, Ordenes ordenes, Alertas alerta
                       or e.modelo ilike @q or e.asignado_a ilike @q or e.huella ilike @q)''');
       params['q'] = '%${texto.replaceAll('%', r'\%').replaceAll('_', r'\_')}%';
     }
-    if ((q['grupo'] ?? '').isNotEmpty) {
-      filtros.add('e.grupo = @g');
-      params['g'] = q['grupo'];
+    if ((q['dominio'] ?? '').isNotEmpty) {
+      final dominio = await buscaDominio(p, q['dominio']);
+      if (dominio == null) return _dominioInvalido();
+      filtros.add('e.dominio = @d');
+      params['d'] = dominio;
     }
     if ((q['estado'] ?? '').isNotEmpty) {
       filtros.add('e.estado = @s');
@@ -89,7 +88,7 @@ void registraRutasPanel(Servidor s, Canal canal, Ordenes ordenes, Alertas alerta
     final id = p.enteroParam('id');
     final e = await p.bd.fila(
       'select ${_columnasEquipo('e')}, e.huella, e.notas, e.apps, e.apps_t, e.primera_vez, e.alta '
-      'from dt.equipo e where e.id = @i and e.org = @o',
+      'from dt.equipo e where e.id = @i and e.org = @o and ${enDominios(p.s.dominios, 'e.dominio')}',
       {'i': id, 'o': p.s.org},
     );
     if (e == null) return _noEsta();
@@ -121,7 +120,7 @@ void registraRutasPanel(Servidor s, Canal canal, Ordenes ordenes, Alertas alerta
     final id = p.enteroParam('id');
     final cambios = <String>[];
     final params = <String, Object?>{'i': id, 'o': p.s.org};
-    for (final campo in const ['nombre', 'etiqueta', 'serie', 'grupo', 'asignado_a', 'notas']) {
+    for (final campo in const ['nombre', 'etiqueta', 'serie', 'asignado_a', 'notas']) {
       if (!p.cuerpo.containsKey(campo)) continue;
       final v = p.texto(campo);
       if (v.length > (campo == 'notas' ? 2000 : 200)) {
@@ -141,12 +140,32 @@ void registraRutasPanel(Servidor s, Canal canal, Ordenes ordenes, Alertas alerta
       cambios.add('estado = @estado');
       params['estado'] = estado;
     }
+    // Moverlo de dominio: solo a uno que la sesión alcance. Quien alcanza un
+    // solo dominio no puede sacar un equipo del suyo.
+    if (p.cuerpo.containsKey('dominio')) {
+      final dominio = await buscaDominio(p, p.cuerpo['dominio']);
+      if (dominio == null) return _dominioInvalido();
+      cambios.add('dominio = @dominio');
+      params['dominio'] = dominio;
+    }
     if (cambios.isEmpty) return Respuesta.falla(400, 'sin_cambios', 'No vino nada que cambiar');
     final e = await p.bd.fila(
-      'update dt.equipo set ${cambios.join(', ')} where id = @i and org = @o returning ${_columnasEquipo('dt.equipo')}',
+      'update dt.equipo set ${cambios.join(', ')} '
+      'where id = @i and org = @o and ${enDominios(p.s.dominios, 'dt.equipo.dominio')} '
+      'returning ${_columnasEquipo('dt.equipo')}',
       params,
     );
     if (e == null) return _noEsta();
+    // Las alertas de reglas de otro dominio ya no son suyas.
+    if (params.containsKey('dominio')) {
+      await p.bd.ejecuta(
+        '''update dt.alerta a set cerrada = now(), nota = 'el equipo cambió de dominio'
+             from dt.regla r
+            where r.id = a.regla and a.equipo = @i and a.cerrada is null
+              and r.dominio is not null and r.dominio <> @d''',
+        {'i': id, 'd': params['dominio']},
+      );
+    }
     // Un equipo que deja de vigilarse no se queda con alertas abiertas.
     if (const {'guardado', 'retirado'}.contains(e['estado'])) {
       await p.bd.ejecuta(
@@ -160,7 +179,7 @@ void registraRutasPanel(Servidor s, Canal canal, Ordenes ordenes, Alertas alerta
 
   s.ruta('GET', '/v1/equipos/:id/recorrido', (p) async {
     final id = p.enteroParam('id');
-    if (!await _esDeLaOrg(p, id)) return _noEsta();
+    if (!await _alcanzaEquipo(p, id)) return _noEsta();
     final (desde, hasta) = _rango(p);
     final r = await p.bd.filas(
       '''select t, lat, lng, precision_m, motivo
@@ -174,7 +193,7 @@ void registraRutasPanel(Servidor s, Canal canal, Ordenes ordenes, Alertas alerta
 
   s.ruta('GET', '/v1/equipos/:id/reportes', (p) async {
     final id = p.enteroParam('id');
-    if (!await _esDeLaOrg(p, id)) return _noEsta();
+    if (!await _alcanzaEquipo(p, id)) return _noEsta();
     final (desde, hasta) = _rango(p);
     final limite = (int.tryParse(p.consulta['limite'] ?? '') ?? 500).clamp(1, 5000);
     final r = await p.bd.filas(
@@ -190,7 +209,7 @@ void registraRutasPanel(Servidor s, Canal canal, Ordenes ordenes, Alertas alerta
 
   s.ruta('GET', '/v1/equipos/:id/ordenes', (p) async {
     final id = p.enteroParam('id');
-    if (!await _esDeLaOrg(p, id)) return _noEsta();
+    if (!await _alcanzaEquipo(p, id)) return _noEsta();
     final r = await p.bd.filas(
       '''select id, tipo, datos, estado, detalle, creado, creado_por, enviada, actualizada, vence
            from dt.orden where equipo = @i order by creado desc limit 100''',
@@ -202,7 +221,7 @@ void registraRutasPanel(Servidor s, Canal canal, Ordenes ordenes, Alertas alerta
   s.ruta('POST', '/v1/equipos/:id/ordenes', (p) async {
     final id = p.enteroParam('id');
     final e = await p.bd.fila(
-      'select estado from dt.equipo where id = @i and org = @o',
+      'select estado from dt.equipo where id = @i and org = @o and ${enDominios(p.s.dominios, 'dominio')}',
       {'i': id, 'o': p.s.org},
     );
     if (e == null) return _noEsta();
@@ -250,7 +269,8 @@ void registraRutasPanel(Servidor s, Canal canal, Ordenes ordenes, Alertas alerta
     if (con == id) return Respuesta.falla(400, 'mismo_equipo', 'Es el mismo equipo');
     final hecho = await p.bd.transaccion((tx) async {
       final dos = await tx.filas(
-        'select id from dt.equipo where org = @o and id = any(@ids) for update',
+        'select id from dt.equipo where org = @o and id = any(@ids) '
+        'and ${enDominios(p.s.dominios, 'dominio')} for update',
         {'o': p.s.org, 'ids': [id, con]},
       );
       if (dos.length != 2) return false;
@@ -269,7 +289,7 @@ void registraRutasPanel(Servidor s, Canal canal, Ordenes ordenes, Alertas alerta
   // equipo que se dejó de usar está `estado: retirado`.
   s.ruta('DELETE', '/v1/equipos/:id', (p) async {
     await p.bd.ejecuta(
-      'delete from dt.equipo where id = @i and org = @o',
+      'delete from dt.equipo where id = @i and org = @o and ${enDominios(p.s.dominios, 'dominio')}',
       {'i': p.enteroParam('id'), 'o': p.s.org},
     );
     return Respuesta.vacio();
@@ -279,10 +299,12 @@ void registraRutasPanel(Servidor s, Canal canal, Ordenes ordenes, Alertas alerta
 
   s.ruta('GET', '/v1/altas', (p) async {
     final r = await p.bd.filas(
-      '''select a.id, a.nombre, a.prefijo, a.grupo, a.usos, a.usos_max, a.vence,
-                a.creado, a.creado_por, a.anulada,
+      '''select a.id, a.nombre, a.prefijo, a.dominio, d.nombre as dominio_nombre,
+                a.usos, a.usos_max, a.vence, a.creado, a.creado_por, a.anulada,
                 (select count(*) from dt.equipo e where e.alta = a.id) as equipos
-           from dt.alta a where a.org = @o order by a.id desc''',
+           from dt.alta a join dt.dominio d on d.id = a.dominio
+          where a.org = @o and ${enDominios(p.s.dominios, 'a.dominio')}
+          order by a.id desc''',
       {'o': p.s.org},
     );
     return Respuesta.ok({'altas': r});
@@ -305,18 +327,22 @@ void registraRutasPanel(Servidor s, Canal canal, Ordenes ordenes, Alertas alerta
       vence = DateTime.tryParse(p.texto('vence'))?.toUtc();
       if (vence == null) return Respuesta.falla(400, 'fecha_invalida', 'vence es una fecha ISO');
     }
+    final (dominio, error) = await dominioDe(p, p.cuerpo);
+    if (error != null) return error;
     final prefijo = Seguridad.hex(4);
     final secreto = Seguridad.token();
     final a = await p.bd.fila(
-      '''insert into dt.alta (org, nombre, prefijo, clave_hash, grupo, usos_max, vence, creado_por)
-         values (@o, @n, @p, @h, @g, @u, @v, @f)
-         returning id, nombre, prefijo, grupo, usos, usos_max, vence, creado''',
+      '''insert into dt.alta (org, nombre, prefijo, clave_hash, dominio, usos_max, vence, creado_por)
+         values (@o, @n, @p, @h, @d, @u, @v, @f)
+         returning id, nombre, prefijo, dominio,
+                   (select nombre from dt.dominio where id = @d) as dominio_nombre,
+                   usos, usos_max, vence, creado''',
       {
         'o': p.s.org,
         'n': nombre,
         'p': prefijo,
         'h': Seguridad.hashToken(secreto),
-        'g': p.texto('grupo'),
+        'd': dominio,
         'u': usosMax,
         'v': vence,
         'f': p.s.firma,
@@ -334,17 +360,24 @@ void registraRutasPanel(Servidor s, Canal canal, Ordenes ordenes, Alertas alerta
 
   s.ruta('DELETE', '/v1/altas/:id', (p) async {
     await p.bd.ejecuta(
-      'update dt.alta set anulada = now() where id = @i and org = @o and anulada is null',
+      'update dt.alta set anulada = now() '
+      'where id = @i and org = @o and anulada is null and ${enDominios(p.s.dominios, 'dominio')}',
       {'i': p.enteroParam('id'), 'o': p.s.org},
     );
     return Respuesta.vacio();
   }, permiso: 'editar');
 
   // ----------------------------------------------------------------- zonas
+  //
+  // Una zona sin dominio es de toda la organización: la ven todos y solo la
+  // toca quien alcanza toda la organización. Con dominio, solo quien lo alcanza.
 
   s.ruta('GET', '/v1/zonas', (p) async {
     final r = await p.bd.filas(
-      'select id, nombre, lat, lng, radio_m, creado from dt.zona where org = @o order by nombre',
+      '''select z.id, z.nombre, z.lat, z.lng, z.radio_m, z.dominio, d.nombre as dominio_nombre, z.creado
+           from dt.zona z left join dt.dominio d on d.id = z.dominio
+          where z.org = @o and ${enDominios(p.s.dominios, 'z.dominio', tambienDeOrg: true)}
+          order by z.nombre''',
       {'o': p.s.org},
     );
     return Respuesta.ok({'zonas': r});
@@ -353,49 +386,88 @@ void registraRutasPanel(Servidor s, Canal canal, Ordenes ordenes, Alertas alerta
   s.ruta('POST', '/v1/zonas', (p) async {
     final z = _leeZona(p);
     if (z is Respuesta) return z;
-    final datos = z as Map<String, Object?>;
+    final (dominio, error) = await dominioDe(p, p.cuerpo, deOrg: true);
+    if (error != null) return error;
     final r = await p.bd.fila(
-      '''insert into dt.zona (org, nombre, lat, lng, radio_m) values (@o, @n, @la, @lo, @r)
-         returning id, nombre, lat, lng, radio_m, creado''',
-      {'o': p.s.org, ...datos},
+      '''insert into dt.zona (org, nombre, lat, lng, radio_m, dominio) values (@o, @n, @la, @lo, @r, @d)
+         returning $_columnasZona''',
+      {'o': p.s.org, 'd': dominio, ...(z as Map<String, Object?>)},
     );
     return Respuesta.creado(r);
   }, permiso: 'editar');
 
   s.ruta('PATCH', '/v1/zonas/:id', (p) async {
+    final id = p.enteroParam('id');
     final z = _leeZona(p);
     if (z is Respuesta) return z;
+    final actual = await p.bd.fila(
+      'select dominio from dt.zona where id = @i and org = @o and ${enDominios(p.s.dominios, 'dominio')}',
+      {'i': id, 'o': p.s.org},
+    );
+    if (actual == null) return _noEsta('Esa zona no existe');
+    var dominio = actual['dominio'] as int?;
+    if (p.cuerpo.containsKey('dominio')) {
+      final (nuevo, error) = await dominioDe(p, p.cuerpo, deOrg: true);
+      if (error != null) return error;
+      // Una regla solo vigila zonas de toda la organización o de su dominio:
+      // llevarse la zona a otro dominio la dejaría vigilando una ajena.
+      if (nuevo != null && nuevo != dominio) {
+        final ajena = await p.bd.fila(
+          '''select 1 as n from dt.regla
+              where org = @o and tipo = 'fuera_de_zona' and (parametros->>'zona')::bigint = @i
+                and (dominio is null or dominio <> @d)
+              limit 1''',
+          {'o': p.s.org, 'i': id, 'd': nuevo},
+        );
+        if (ajena != null) {
+          return Respuesta.falla(409, 'zona_en_uso',
+              'Una regla de otro dominio (o de toda la organización) vigila esta zona: cámbiala primero');
+        }
+      }
+      dominio = nuevo;
+    }
     final r = await p.bd.fila(
-      '''update dt.zona set nombre = @n, lat = @la, lng = @lo, radio_m = @r
-          where id = @i and org = @o returning id, nombre, lat, lng, radio_m, creado''',
-      {'i': p.enteroParam('id'), 'o': p.s.org, ...(z as Map<String, Object?>)},
+      '''update dt.zona set nombre = @n, lat = @la, lng = @lo, radio_m = @r, dominio = @d
+          where id = @i and org = @o returning $_columnasZona''',
+      {'i': id, 'o': p.s.org, 'd': dominio, ...(z as Map<String, Object?>)},
     );
     return r == null ? _noEsta('Esa zona no existe') : Respuesta.ok(r);
   }, permiso: 'editar');
 
   s.ruta('DELETE', '/v1/zonas/:id', (p) async {
+    final id = p.enteroParam('id');
+    final zona = await p.bd.fila(
+      'select id from dt.zona where id = @i and org = @o and ${enDominios(p.s.dominios, 'dominio')}',
+      {'i': id, 'o': p.s.org},
+    );
+    if (zona == null) return Respuesta.vacio();
     final usada = await p.bd.fila(
       '''select count(*) as n from dt.regla
           where org = @o and tipo = 'fuera_de_zona' and (parametros->>'zona')::bigint = @i''',
-      {'i': p.enteroParam('id'), 'o': p.s.org},
+      {'i': id, 'o': p.s.org},
     );
     if ((usada!['n'] as int) > 0) {
       return Respuesta.falla(409, 'zona_en_uso', 'Una regla vigila esta zona: bórrala o cámbiala primero');
     }
-    await p.bd.ejecuta(
-      'delete from dt.zona where id = @i and org = @o',
-      {'i': p.enteroParam('id'), 'o': p.s.org},
-    );
+    await p.bd.ejecuta('delete from dt.zona where id = @i and org = @o', {'i': id, 'o': p.s.org});
     return Respuesta.vacio();
   }, permiso: 'editar');
 
   // ---------------------------------------------------------------- reglas
+  //
+  // Igual que las zonas: sin dominio vigila a todos los equipos de la
+  // organización; esa la ve cualquiera (aplica también a los suyos) y solo la
+  // toca quien alcanza toda la organización.
 
   s.ruta('GET', '/v1/reglas', (p) async {
     final r = await p.bd.filas(
-      '''select r.id, r.nombre, r.tipo, r.grupo, r.parametros, r.activa, r.creado,
-                (select count(*) from dt.alerta a where a.regla = r.id and a.cerrada is null) as abiertas
-           from dt.regla r where r.org = @o order by r.id''',
+      '''select r.id, r.nombre, r.tipo, r.dominio, d.nombre as dominio_nombre, r.parametros, r.activa, r.creado,
+                (select count(*) from dt.alerta a join dt.equipo e on e.id = a.equipo
+                  where a.regla = r.id and a.cerrada is null
+                    and ${enDominios(p.s.dominios, 'e.dominio')}) as abiertas
+           from dt.regla r left join dt.dominio d on d.id = r.dominio
+          where r.org = @o and ${enDominios(p.s.dominios, 'r.dominio', tambienDeOrg: true)}
+          order by r.id''',
       {'o': p.s.org},
     );
     return Respuesta.ok({'reglas': r});
@@ -406,20 +478,21 @@ void registraRutasPanel(Servidor s, Canal canal, Ordenes ordenes, Alertas alerta
     if (leida is Respuesta) return leida;
     final datos = leida as Map<String, Object?>;
     final r = await p.bd.fila(
-      '''insert into dt.regla (org, nombre, tipo, grupo, parametros, activa)
-         values (@o, @n, @t, @g, @pa, @a)
-         returning id, nombre, tipo, grupo, parametros, activa, creado''',
+      '''insert into dt.regla (org, nombre, tipo, dominio, parametros, activa)
+         values (@o, @n, @t, @d, @pa, @a)
+         returning $_columnasRegla''',
       {'o': p.s.org, ...datos},
     );
     return Respuesta.creado(r);
   }, permiso: 'editar');
 
   // Cambia solo lo que viene: `{activa: false}` apaga la regla y deja su
-  // nombre, su grupo y sus parámetros como estaban.
+  // nombre, su dominio y sus parámetros como estaban.
   s.ruta('PATCH', '/v1/reglas/:id', (p) async {
     final id = p.enteroParam('id');
     final actual = await p.bd.fila(
-      'select nombre, tipo, grupo, parametros, activa from dt.regla where id = @i and org = @o',
+      '''select nombre, tipo, dominio, parametros, activa from dt.regla
+          where id = @i and org = @o and ${enDominios(p.s.dominios, 'dominio')}''',
       {'i': id, 'o': p.s.org},
     );
     if (actual == null) return _noEsta('Esa regla no existe');
@@ -428,14 +501,14 @@ void registraRutasPanel(Servidor s, Canal canal, Ordenes ordenes, Alertas alerta
     if (leida is Respuesta) return leida;
     final nueva = leida as Map<String, Object?>;
     final r = await p.bd.fila(
-      '''update dt.regla set nombre = @n, grupo = @g, parametros = @pa, activa = @a
+      '''update dt.regla set nombre = @n, dominio = @d, parametros = @pa, activa = @a
           where id = @i and org = @o
-          returning id, nombre, tipo, grupo, parametros, activa, creado''',
+          returning $_columnasRegla''',
       {'i': id, 'o': p.s.org, ...nueva..remove('t')},
     );
-    // Apagada o con otro grupo u otros parámetros, sus alertas abiertas ya no
-    // dicen la verdad. Cambiarle el nombre no las toca.
-    final cambio = nueva['g'] != actual['grupo'] ||
+    // Apagada o con otro dominio u otros parámetros, sus alertas abiertas ya
+    // no dicen la verdad. Cambiarle el nombre no las toca.
+    final cambio = nueva['d'] != actual['dominio'] ||
         nueva['a'] != actual['activa'] ||
         jsonEncode(nueva['pa']) != jsonEncode(actual['parametros']);
     if (cambio) {
@@ -450,7 +523,7 @@ void registraRutasPanel(Servidor s, Canal canal, Ordenes ordenes, Alertas alerta
 
   s.ruta('DELETE', '/v1/reglas/:id', (p) async {
     await p.bd.ejecuta(
-      'delete from dt.regla where id = @i and org = @o',
+      'delete from dt.regla where id = @i and org = @o and ${enDominios(p.s.dominios, 'dominio')}',
       {'i': p.enteroParam('id'), 'o': p.s.org},
     );
     return Respuesta.vacio();
@@ -460,7 +533,7 @@ void registraRutasPanel(Servidor s, Canal canal, Ordenes ordenes, Alertas alerta
 
   s.ruta('GET', '/v1/alertas', (p) async {
     final q = p.consulta;
-    final filtros = <String>['a.org = @o'];
+    final filtros = <String>['a.org = @o', enDominios(p.s.dominios, 'e.dominio')];
     final params = <String, Object?>{'o': p.s.org};
     if (q['todas'] != '1') filtros.add('a.cerrada is null');
     final equipo = int.tryParse(q['equipo'] ?? '');
@@ -472,10 +545,11 @@ void registraRutasPanel(Servidor s, Canal canal, Ordenes ordenes, Alertas alerta
     final r = await p.bd.filas(
       '''select a.id, a.tipo, a.abierta, a.cerrada, a.detalle, a.nota,
                 a.regla, r.nombre as regla_nombre,
-                a.equipo, e.nombre as equipo_nombre, e.etiqueta, e.grupo
+                a.equipo, e.nombre as equipo_nombre, e.etiqueta, e.dominio, d.nombre as dominio_nombre
            from dt.alerta a
            join dt.regla r on r.id = a.regla
            join dt.equipo e on e.id = a.equipo
+           join dt.dominio d on d.id = e.dominio
           where ${filtros.join(' and ')}
           order by a.abierta desc limit @l''',
       params,
@@ -485,7 +559,12 @@ void registraRutasPanel(Servidor s, Canal canal, Ordenes ordenes, Alertas alerta
 
   s.ruta('POST', '/v1/alertas/:id/cerrar', (p) async {
     final nota = p.texto('nota');
-    final ok = await alertas.cierraAMano(p.s.org, p.enteroParam('id'), nota.length > 500 ? nota.substring(0, 500) : nota);
+    final ok = await alertas.cierraAMano(
+      p.s.org,
+      p.enteroParam('id'),
+      nota.length > 500 ? nota.substring(0, 500) : nota,
+      dominios: p.s.dominios,
+    );
     return ok ? Respuesta.ok({'ok': true}) : _noEsta('Esa alerta no existe o ya estaba cerrada');
   }, permiso: 'editar');
 
@@ -580,11 +659,18 @@ void registraRutasPanel(Servidor s, Canal canal, Ordenes ordenes, Alertas alerta
 
 /// Lo que se enseña de un equipo en una lista. [t] es el alias de la tabla.
 String _columnasEquipo(String t) => [
-      'id', 'nombre', 'etiqueta', 'serie', 'modelo', 'fabricante', 'android', 'grupo',
+      'id', 'nombre', 'etiqueta', 'serie', 'modelo', 'fabricante', 'android', 'dominio',
       'asignado_a', 'estado', 'conectado', 'ultima_vez', 'ultimo_reporte', 'ultimo_motivo',
       'bateria', 'cargando', 'red_tipo', 'red_ssid', 'lat', 'lng', 'precision_m', 'ubicacion_t',
       'almacenamiento_libre', 'almacenamiento_total',
-    ].map((c) => '$t.$c').join(', ');
+    ].map((c) => '$t.$c').followedBy(['(select nombre from dt.dominio where id = $t.dominio) as dominio_nombre']).join(', ');
+
+const _columnasZona = '''id, nombre, lat, lng, radio_m, dominio,
+    (select nombre from dt.dominio where id = dt.zona.dominio) as dominio_nombre, creado''';
+
+const _columnasRegla = '''id, nombre, tipo, dominio,
+    (select nombre from dt.dominio where id = dt.regla.dominio) as dominio_nombre,
+    parametros, activa, creado''';
 
 /// Lo que va en el QR de un código de alta.
 String textoQr(String urlPublica, String codigo) =>
@@ -592,8 +678,16 @@ String textoQr(String urlPublica, String codigo) =>
 
 Respuesta _noEsta([String mensaje = 'Ese equipo no existe']) => Respuesta.falla(404, 'no_encontrado', mensaje);
 
-Future<bool> _esDeLaOrg(Peticion p, int equipo) async =>
-    await p.bd.fila('select 1 as ok from dt.equipo where id = @i and org = @o', {'i': equipo, 'o': p.s.org}) != null;
+Respuesta _dominioInvalido() =>
+    Respuesta.falla(400, 'dominio_invalido', 'Ese dominio no existe o no lo alcanzas');
+
+/// Si el equipo es de la organización y de un dominio que la sesión alcanza.
+Future<bool> _alcanzaEquipo(Peticion p, int equipo) async =>
+    await p.bd.fila(
+      'select 1 as ok from dt.equipo where id = @i and org = @o and ${enDominios(p.s.dominios, 'dominio')}',
+      {'i': equipo, 'o': p.s.org},
+    ) !=
+    null;
 
 /// `desde` y `hasta` de la consulta; por defecto, las últimas 24 horas.
 (DateTime, DateTime) _rango(Peticion p) {
@@ -629,6 +723,8 @@ Future<Object> _leeRegla(Peticion p, Map<String, Object?> cuerpo) async {
   if (!_tiposRegla.contains(tipo)) {
     return Respuesta.falla(400, 'tipo_invalido', 'La regla es ${_tiposRegla.join(', ')}');
   }
+  final (dominio, error) = await dominioDe(p, cuerpo, deOrg: true);
+  if (error != null) return error;
   final crudos = cuerpo['parametros'] is Map
       ? (cuerpo['parametros'] as Map).cast<String, Object?>()
       : const <String, Object?>{};
@@ -645,10 +741,19 @@ Future<Object> _leeRegla(Peticion p, Map<String, Object?> cuerpo) async {
       parametros = {'porcentaje': pct};
     case 'fuera_de_zona':
       final z = n('zona');
+      // De toda la organización o del mismo dominio que la regla: una regla
+      // de Duralon no vigila el almacén de otro cliente.
       final existe = z == null
           ? null
-          : await p.bd.fila('select id from dt.zona where id = @z and org = @o', {'z': z, 'o': p.s.org});
-      if (existe == null) return Respuesta.falla(400, 'zona_invalida', 'parametros.zona es el id de una zona tuya');
+          : await p.bd.fila(
+              '''select id from dt.zona
+                  where id = @z and org = @o and (dominio is null or dominio = @d::bigint)''',
+              {'z': z, 'o': p.s.org, 'd': dominio},
+            );
+      if (existe == null) {
+        return Respuesta.falla(400, 'zona_invalida',
+            'parametros.zona es el id de una zona de toda la organización o del mismo dominio que la regla');
+      }
       parametros = {'zona': z};
     default:
       parametros = const {};
@@ -656,7 +761,7 @@ Future<Object> _leeRegla(Peticion p, Map<String, Object?> cuerpo) async {
   return {
     'n': texto('nombre'),
     't': tipo,
-    'g': texto('grupo'),
+    'd': dominio,
     'pa': parametros,
     'a': cuerpo['activa'] is bool ? cuerpo['activa'] : true,
   };
@@ -695,7 +800,6 @@ Future<void> _une(Bd tx, int id, int con) async {
           etiqueta = case when d.etiqueta = '' then @etiqueta else d.etiqueta end,
           serie = case when d.serie = '' then @serie else d.serie end,
           huella = coalesce(d.huella, @huella),
-          grupo = case when d.grupo = '' then @grupo else d.grupo end,
           asignado_a = case when d.asignado_a = '' then @asignado else d.asignado_a end,
           notas = case when d.notas = '' then @notas
                        when @notas = '' then d.notas
@@ -709,7 +813,6 @@ Future<void> _une(Bd tx, int id, int con) async {
       'etiqueta': c!['etiqueta'],
       'serie': c['serie'],
       'huella': c['huella'],
-      'grupo': c['grupo'],
       'asignado': c['asignado_a'],
       'notas': c['notas'],
       'primera': c['primera_vez'],

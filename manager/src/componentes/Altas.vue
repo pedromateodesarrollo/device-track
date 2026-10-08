@@ -1,16 +1,17 @@
 <script setup>
 import { ref, computed, onMounted } from 'vue'
 import QRCode from 'qrcode'
-import { api, puede, fecha, hace } from '../api.js'
+import { api, cargaDominios, puede, fecha, hace } from '../api.js'
 
 const props = defineProps({ yo: Object })
 const puedeEditar = computed(() => puede(props.yo, 'editar'))
 
 const altas = ref([])
-const grupos = ref([])
+const dominios = ref([])
+const variosDominios = computed(() => dominios.value.length > 1)
 const error = ref('')
 const nombre = ref('')
-const grupo = ref('')
+const dominio = ref('')
 const usosMax = ref('')
 const venceDias = ref('30')
 const creado = ref(null)
@@ -28,17 +29,27 @@ async function carga() {
   }
 }
 
-onMounted(() => {
+onMounted(async () => {
   carga()
-  api.get('/v1/grupos').then((d) => (grupos.value = d.grupos)).catch(() => {})
+  try {
+    dominios.value = await cargaDominios()
+  } catch { /* sin la lista, el hub pone el dominio por defecto */ }
+  dominio.value = porDefecto()
 })
+
+// El General si la sesión lo alcanza; si no, el único que alcance. Limitada a
+// varios sin el General, que elija: el hub no adivina.
+function porDefecto() {
+  const l = dominios.value
+  return (l.find((d) => d.slug === 'general') || (l.length === 1 ? l[0] : null))?.id ?? ''
+}
 
 async function crea() {
   error.value = ''
   try {
     const a = await api.post('/v1/altas', {
       nombre: nombre.value.trim(),
-      grupo: grupo.value.trim(),
+      ...(dominio.value ? { dominio: dominio.value } : {}),
       ...(usosMax.value ? { usos_max: Number(usosMax.value) } : {}),
       ...(venceDias.value ? { vence_dias: Number(venceDias.value) } : {}),
     })
@@ -97,7 +108,7 @@ const anulados = computed(() => altas.value.filter((a) => a.anulada).length)
         En cada equipo instala el agente desde
         <a href="https://apk.chalonasoft.com/i/devicetrack" target="_blank" rel="noopener">apk.chalonasoft.com/i/devicetrack</a>
         y escanea este QR (en una Zebra, con el lector). O pega el código en una app con el plugin.
-        <template v-if="creado.grupo"> Los equipos entran en el grupo <strong>{{ creado.grupo }}</strong>.</template>
+        <template v-if="creado.dominio_nombre"> Los equipos que entren con él quedan en el dominio <strong>{{ creado.dominio_nombre }}</strong>.</template>
       </p>
       <div class="secreto">{{ creado.codigo }}</div>
       <div class="en-linea" style="margin-top: 10px; flex-wrap: wrap">
@@ -111,21 +122,24 @@ const anulados = computed(() => altas.value.filter((a) => a.anulada).length)
   <div v-if="puedeEditar" class="tarjeta" style="margin-bottom: 20px">
     <h3>Crear un código</h3>
     <p class="apagado">
-      Uno por tanda o por grupo: «Terminales del almacén», «Teléfonos de la ruta norte». Así se
-      sabe cuál anular.
+      Uno por tanda: «Terminales del almacén», «Teléfonos de la ruta norte». Así se sabe cuál
+      anular.<template v-if="variosDominios"> Los equipos que entren con él quedan en el dominio
+      que elijas.</template>
     </p>
     <form @submit.prevent="crea">
       <div class="rejilla-campos">
         <div><label>Nombre</label><input v-model="nombre" maxlength="200" placeholder="Terminales del almacén" required /></div>
-        <div>
-          <label>Grupo <span class="apagado">(opcional)</span></label>
-          <input v-model="grupo" list="grupos-alta" maxlength="200" placeholder="Almacén" />
-          <datalist id="grupos-alta"><option v-for="g in grupos" :key="g.grupo" :value="g.grupo" /></datalist>
+        <div v-if="variosDominios">
+          <label>Dominio</label>
+          <select v-model="dominio" required>
+            <option value="" disabled>Elige un dominio…</option>
+            <option v-for="d in dominios" :key="d.id" :value="d.id">{{ d.nombre }}</option>
+          </select>
         </div>
         <div><label>Tope de usos <span class="apagado">(vacío = sin tope)</span></label><input v-model="usosMax" type="number" min="1" placeholder="Sin tope" /></div>
         <div><label>Vence en días <span class="apagado">(vacío = no vence)</span></label><input v-model="venceDias" type="number" min="1" max="3650" placeholder="No vence" /></div>
       </div>
-      <button class="boton" style="margin-top: 14px" :disabled="!nombre.trim()">Crear código</button>
+      <button class="boton" style="margin-top: 14px" :disabled="!nombre.trim() || (variosDominios && !dominio)">Crear código</button>
     </form>
   </div>
 
@@ -135,14 +149,14 @@ const anulados = computed(() => altas.value.filter((a) => a.anulada).length)
   </div>
   <p v-if="!lista.length" class="apagado">Todavía no hay códigos.</p>
   <table v-else class="tarjetas">
-    <thead><tr><th>Nombre</th><th>Grupo</th><th>Usos</th><th>Vence</th><th>Equipos</th><th>Estado</th><th></th></tr></thead>
+    <thead><tr><th>Nombre</th><th v-if="variosDominios">Dominio</th><th>Usos</th><th>Vence</th><th>Equipos</th><th>Estado</th><th></th></tr></thead>
     <tbody>
       <tr v-for="a in lista" :key="a.id" :class="{ cerrada: a.anulada }">
         <td data-t="Nombre">
           <strong>{{ a.nombre }}</strong>
           <div class="mono">dta_{{ a.prefijo }}_…</div>
         </td>
-        <td data-t="Grupo">{{ a.grupo || '—' }}</td>
+        <td v-if="variosDominios" data-t="Dominio">{{ a.dominio_nombre }}</td>
         <td data-t="Usos">{{ a.usos }}<span class="apagado"> / {{ a.usos_max ?? '∞' }}</span></td>
         <td data-t="Vence" :title="fecha(a.vence)">{{ a.vence ? fecha(a.vence) : 'no vence' }}</td>
         <td data-t="Equipos">{{ a.equipos }}</td>

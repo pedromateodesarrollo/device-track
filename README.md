@@ -55,7 +55,9 @@ device-track resuelve eso con dos cosas: **una app pequeña en cada equipo** y
 * **Recibir avisos** cuando un equipo se queda sin batería, lleva una hora sin
   dar señales, sale del almacén o lo apagan.
 * **Llevar el inventario**: a quién está asignado cada uno, su número de activo
-  fijo, su número de serie, en qué grupo está.
+  fijo, su número de serie, en qué dominio está.
+* **Separar por dominios**: los equipos de cada cliente, almacén o sucursal, y
+  a quién dejas ver cuáles. El encargado de un cliente ve los suyos; tú, todos.
 
 ![El mapa con los equipos y las zonas](docs/img/mapa.jpg)
 
@@ -156,7 +158,7 @@ no hay nadie que entre:
 device-track-hub org --nombre N --correo C     # organización + su administrador (imprime el enlace)
 device-track-hub invitar --correo C            # enlace nuevo para alguien que ya existe
 device-track-hub llave --org 1 --nombre "ERP" --permisos leer
-device-track-hub alta --org 1 --nombre "Terminales" --grupo "Almacén" --usos 50
+device-track-hub alta --org 1 --nombre "Terminales" --dominio almacen --usos 50
 ```
 
 Imprimen el resultado —un enlace, una llave, un código— en stdout y nada más,

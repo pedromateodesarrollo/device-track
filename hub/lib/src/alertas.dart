@@ -5,6 +5,7 @@ import 'dart:io';
 import 'package:crypto/crypto.dart';
 
 import 'db.dart';
+import 'dominios.dart';
 import 'geo.dart';
 import 'log.dart';
 
@@ -45,7 +46,7 @@ class Alertas {
   /// [conUbicacion], si ese lote trajo una posición.
   Future<void> alReportar(int equipo, {String? motivo, bool conUbicacion = false}) async {
     final e = await bd.fila(
-      '''select id, org, grupo, estado, bateria, cargando, lat, lng, precision_m
+      '''select id, org, dominio, estado, bateria, cargando, lat, lng, precision_m
            from dt.equipo where id = @e and estado in $_vigilados''',
       {'e': equipo},
     );
@@ -101,7 +102,7 @@ class Alertas {
   /// Hubo contacto (el WebSocket se abrió): cierra «sin reporte».
   Future<void> alContacto(int equipo) async {
     final e = await bd.fila(
-      'select id, org, grupo, estado from dt.equipo where id = @e and estado in $_vigilados',
+      'select id, org, dominio, estado from dt.equipo where id = @e and estado in $_vigilados',
       {'e': equipo},
     );
     if (e == null) return;
@@ -120,7 +121,7 @@ class Alertas {
                                    'minutos', (r.parametros->>'minutos')::int)
            from dt.regla r
            join dt.equipo e on e.org = r.org
-                           and (r.grupo = '' or r.grupo = e.grupo)
+                           and (r.dominio is null or r.dominio = e.dominio)
                            and e.estado in $_vigilados
                            and not e.conectado
           where r.activa and r.tipo = 'sin_reporte'
@@ -135,11 +136,14 @@ class Alertas {
   }
 
   /// Cierra a mano. Si la condición sigue, la próxima evaluación la vuelve a
-  /// abrir: cerrar no apaga la regla.
-  Future<bool> cierraAMano(int org, int alerta, String nota) async {
+  /// abrir: cerrar no apaga la regla. Con [dominios], solo la de un equipo de
+  /// esos dominios.
+  Future<bool> cierraAMano(int org, int alerta, String nota, {List<int>? dominios}) async {
     final r = await bd.fila(
       '''update dt.alerta set cerrada = now(), nota = @n
-          where id = @a and org = @o and cerrada is null returning id''',
+          where id = @a and org = @o and cerrada is null
+            and equipo in (select id from dt.equipo where org = @o and ${enDominios(dominios, 'dominio')})
+          returning id''',
       {'a': alerta, 'o': org, 'n': nota},
     );
     if (r == null) return false;
@@ -149,8 +153,8 @@ class Alertas {
 
   Future<List<Map<String, Object?>>> _reglasDe(Map<String, Object?> e) => bd.filas(
         '''select id, tipo, parametros from dt.regla
-            where org = @o and activa and (grupo = '' or grupo = @g)''',
-        {'o': e['org'], 'g': e['grupo']},
+            where org = @o and activa and (dominio is null or dominio = @d)''',
+        {'o': e['org'], 'd': e['dominio']},
       );
 
   Future<void> _abre(Map<String, Object?> regla, Map<String, Object?> e, Map<String, Object?> detalle) async {
@@ -181,12 +185,14 @@ class Alertas {
       final a = await bd.fila(
         '''select a.id, a.tipo, a.abierta, a.cerrada, a.detalle, a.nota,
                   r.id as regla_id, r.nombre as regla_nombre,
-                  e.id as equipo_id, e.nombre as equipo_nombre, e.etiqueta, e.grupo, e.asignado_a,
+                  e.id as equipo_id, e.nombre as equipo_nombre, e.etiqueta, e.asignado_a,
                   e.lat, e.lng, e.ubicacion_t, e.bateria,
+                  d.id as dominio_id, d.nombre as dominio_nombre, d.slug as dominio_slug,
                   o.id as org_id, o.nombre as org_nombre, o.webhook_url, o.webhook_secreto
              from dt.alerta a
              join dt.regla r on r.id = a.regla
              join dt.equipo e on e.id = a.equipo
+             join dt.dominio d on d.id = e.dominio
              join dt.org o on o.id = a.org
             where a.id = @a''',
         {'a': alerta},
@@ -209,7 +215,7 @@ class Alertas {
           'id': a['equipo_id'],
           'nombre': a['equipo_nombre'],
           'etiqueta': a['etiqueta'],
-          'grupo': a['grupo'],
+          'dominio': {'id': a['dominio_id'], 'nombre': a['dominio_nombre'], 'slug': a['dominio_slug']},
           'asignado_a': a['asignado_a'],
           'bateria': a['bateria'],
           'ubicacion': a['lat'] == null

@@ -80,6 +80,31 @@ export function puede(yo, permiso) {
   return (porRol[yo.rol] || []).includes(permiso)
 }
 
+// ---------------------------------------------------------------- dominios
+
+/// Una persona puede estar acotada a uno o varios dominios (`/v1/yo` los
+/// trae). Lista vacía = toda la organización.
+export const acotado = (yo) => (yo?.dominios?.length ?? 0) > 0
+
+/// «Duralon» o «Duralon, JF»: lo que alcanza una sesión acotada.
+export const alcanceTexto = (yo) => (yo?.dominios || []).map((d) => d.nombre).join(', ')
+
+/// Si la sesión puede cambiar una zona o regla de ese dominio (`null` = de
+/// toda la organización). Acotada, mira lo de toda la organización pero solo
+/// toca lo de sus dominios. Como con `puede`, quien decide es el hub.
+export const alcanza = (yo, dominio) =>
+  !acotado(yo) || (dominio != null && yo.dominios.some((d) => d.id === dominio))
+
+/// Los dominios que alcanza la sesión, para filtros y selectores. Con uno
+/// solo no hay nada que elegir, y las pantallas no lo mencionan.
+export const cargaDominios = () => api.get('/v1/dominios').then((d) => d.dominios)
+
+/// Los nombres de una lista de ids de dominio, o «Toda la organización».
+export function nombresDominios(ids, dominios) {
+  if (!ids?.length) return 'Toda la organización'
+  return ids.map((id) => dominios.find((d) => d.id === id)?.nombre || `#${id}`).join(', ')
+}
+
 // ---------------------------------------------------------------- formatos
 
 /// Todo en la hora del navegador y a la dominicana: 7/10/2026 3:05 p. m.

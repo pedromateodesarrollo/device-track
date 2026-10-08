@@ -1,6 +1,6 @@
 <script setup>
 import { ref, reactive, computed, onMounted, onUnmounted, watch, nextTick } from 'vue'
-import { api, puede, distancia, tiposRegla } from '../api.js'
+import { api, cargaDominios, puede, acotado, alcanza, distancia, tiposRegla } from '../api.js'
 import { creaMapa, circuloZona, colores, esc, L } from '../mapa.js'
 
 const props = defineProps({ yo: Object })
@@ -8,8 +8,24 @@ const puedeEditar = computed(() => puede(props.yo, 'editar'))
 
 const zonas = ref([])
 const reglas = ref([])
-const grupos = ref([])
+const dominios = ref([])
 const error = ref('')
+
+// ================================================================ dominios
+//
+// Una regla o una zona es de toda la organización (`dominio` null) o de un
+// dominio. Quien está limitada a unos dominios ve las de toda la organización
+// pero solo crea y toca las de los suyos.
+const sinAcotar = computed(() => !acotado(props.yo))
+// El selector «a quién» sale solo si hay algo que elegir: con un único
+// dominio a la vista, sin acotar va todo a la organización y acotada, a ese.
+const eligeDominio = computed(() => dominios.value.length > 1)
+const dominioPorDefecto = () => {
+  if (sinAcotar.value) return null
+  return dominios.value.length === 1 ? dominios.value[0].id : ''
+}
+// Si esta sesión puede editar o borrar esa regla o zona.
+const toca = (x) => puedeEditar.value && alcanza(props.yo, x.dominio ?? null)
 
 async function carga() {
   try {
@@ -32,7 +48,7 @@ let borrador = null
 let encuadrado = false
 
 // La zona que se está creando o editando. `id` vacío = nueva.
-const zona = reactive({ id: null, nombre: '', lat: null, lng: null, radio_m: 150 })
+const zona = reactive({ id: null, nombre: '', dominio: null, lat: null, lng: null, radio_m: 150 })
 const editandoZona = ref(false)
 const errorZona = ref('')
 const confirmaZona = ref(null)
@@ -77,7 +93,7 @@ watch(editandoZona, async () => {
 })
 
 function nuevaZona() {
-  Object.assign(zona, { id: null, nombre: '', lat: null, lng: null, radio_m: 150 })
+  Object.assign(zona, { id: null, nombre: '', dominio: dominioPorDefecto(), lat: null, lng: null, radio_m: 150 })
   editandoZona.value = true
   errorZona.value = ''
   pintaZonas()
@@ -85,7 +101,7 @@ function nuevaZona() {
 }
 
 function editaZona(z) {
-  Object.assign(zona, { id: z.id, nombre: z.nombre, lat: z.lat, lng: z.lng, radio_m: z.radio_m })
+  Object.assign(zona, { id: z.id, nombre: z.nombre, dominio: z.dominio ?? null, lat: z.lat, lng: z.lng, radio_m: z.radio_m })
   editandoZona.value = true
   errorZona.value = ''
   pintaZonas()
@@ -103,6 +119,8 @@ async function guardaZona() {
   errorZona.value = ''
   const cuerpo = {
     nombre: zona.nombre.trim(),
+    // Sin elegir (la lista de dominios no llegó): decide el hub.
+    ...(zona.dominio !== '' ? { dominio: zona.dominio } : {}),
     lat: Number(zona.lat),
     lng: Number(zona.lng),
     radio_m: Math.round(Number(zona.radio_m)),
@@ -142,8 +160,8 @@ onMounted(async () => {
     zona.lat = Number(ev.latlng.lat.toFixed(6))
     zona.lng = Number(ev.latlng.lng.toFixed(6))
   })
+  cargaDominios().then((d) => (dominios.value = d)).catch(() => {})
   await carga()
-  api.get('/v1/grupos').then((d) => (grupos.value = d.grupos)).catch(() => {})
 })
 onUnmounted(() => mapa?.remove())
 
@@ -151,13 +169,25 @@ const nombreZona = (id) => zonas.value.find((z) => z.id === Number(id))?.nombre
 
 // ================================================================= reglas
 
-const regla = reactive({ id: null, tipo: 'sin_reporte', nombre: '', grupo: '', minutos: 60, porcentaje: 20, zona: '', activa: true })
+const regla = reactive({ id: null, tipo: 'sin_reporte', nombre: '', dominio: null, minutos: 60, porcentaje: 20, zona: '', activa: true })
 const editandoRegla = ref(false)
 const errorRegla = ref('')
 const confirmaRegla = ref(null)
 
+// «Fuera de zona» solo con una zona de toda la organización o del mismo
+// dominio que la regla: una regla de toda la organización, solo con las de
+// toda la organización.
+const zonasRegla = computed(() =>
+  zonas.value.filter((z) => z.dominio == null || (regla.dominio != null && regla.dominio !== '' && z.dominio === regla.dominio)),
+)
+// Al cambiar a quién vigila, la zona elegida puede dejar de valer.
+watch(() => regla.dominio, () => {
+  if (!zonasRegla.value.some((z) => z.id === Number(regla.zona))) regla.zona = zonasRegla.value[0]?.id ?? ''
+})
+
 function nuevaRegla() {
-  Object.assign(regla, { id: null, tipo: 'sin_reporte', nombre: '', grupo: '', minutos: 60, porcentaje: 20, zona: zonas.value[0]?.id ?? '', activa: true })
+  Object.assign(regla, { id: null, tipo: 'sin_reporte', nombre: '', dominio: dominioPorDefecto(), minutos: 60, porcentaje: 20, zona: '', activa: true })
+  regla.zona = zonasRegla.value[0]?.id ?? ''
   editandoRegla.value = true
   errorRegla.value = ''
 }
@@ -165,7 +195,7 @@ function nuevaRegla() {
 function editaRegla(r) {
   const p = r.parametros || {}
   Object.assign(regla, {
-    id: r.id, tipo: r.tipo, nombre: r.nombre, grupo: r.grupo,
+    id: r.id, tipo: r.tipo, nombre: r.nombre, dominio: r.dominio ?? null,
     minutos: p.minutos ?? 60, porcentaje: p.porcentaje ?? 20, zona: p.zona ?? '', activa: r.activa,
   })
   editandoRegla.value = true
@@ -181,9 +211,13 @@ function parametrosDe(r) {
 
 async function guardaRegla() {
   errorRegla.value = ''
+  if (regla.dominio === '' && eligeDominio.value) {
+    errorRegla.value = 'Elige a qué equipos vigila.'
+    return
+  }
   const cuerpo = {
     nombre: regla.nombre.trim(),
-    grupo: regla.grupo.trim(),
+    ...(regla.dominio !== '' ? { dominio: regla.dominio } : {}),
     parametros: parametrosDe(regla),
     activa: regla.activa,
   }
@@ -200,7 +234,7 @@ async function guardaRegla() {
 // Encender o apagar sin abrir el formulario. El hub pide la regla entera.
 async function alternaRegla(r) {
   try {
-    await api.patch(`/v1/reglas/${r.id}`, { nombre: r.nombre, grupo: r.grupo, parametros: r.parametros, activa: !r.activa })
+    await api.patch(`/v1/reglas/${r.id}`, { nombre: r.nombre, dominio: r.dominio ?? null, parametros: r.parametros, activa: !r.activa })
     await carga()
   } catch (e) {
     error.value = e.message
@@ -245,10 +279,12 @@ function minutosLegibles(m) {
 <template>
   <div class="cabecera-seccion"><h2>Reglas y zonas</h2></div>
   <p class="apagado" style="max-width: 760px">
-    Una <strong>regla</strong> dice qué vigilar, para todos los equipos o para un grupo; cuando
-    se cumple abre una alerta, que se cierra sola cuando el equipo se recupera. Una
-    <strong>zona</strong> es un círculo en el mapa (el almacén, la sucursal) para la regla
+    Una <strong>regla</strong> dice qué vigilar, para todos los equipos o solo para los de un
+    dominio; cuando se cumple abre una alerta, que se cierra sola cuando el equipo se recupera.
+    Una <strong>zona</strong> es un círculo en el mapa (el almacén, la sucursal) para la regla
     «fuera de zona».
+    <template v-if="!sinAcotar"> Las de toda la organización las ves, pero solo las cambia quien
+    ve toda la organización.</template>
   </p>
   <p v-if="error" class="aviso">{{ error }}</p>
 
@@ -271,10 +307,15 @@ function minutosLegibles(m) {
           <label>Nombre</label>
           <input v-model="regla.nombre" maxlength="200" :placeholder="tiposRegla[regla.tipo].nombre" />
         </div>
-        <div>
-          <label>Grupo <span class="apagado">(vacío = todos)</span></label>
-          <input v-model="regla.grupo" list="grupos-regla" maxlength="200" placeholder="Todos los equipos" />
-          <datalist id="grupos-regla"><option v-for="g in grupos" :key="g.grupo" :value="g.grupo" /></datalist>
+        <div v-if="eligeDominio">
+          <label>A quién</label>
+          <!-- Sin `required`: la opción de toda la organización vale null, el
+               navegador la ve vacía y no dejaría guardar. -->
+          <select v-model="regla.dominio">
+            <option v-if="sinAcotar" :value="null">Todos los equipos de la organización</option>
+            <option v-else value="" disabled>Elige un dominio…</option>
+            <option v-for="d in dominios" :key="d.id" :value="d.id">Los equipos de {{ d.nombre }}</option>
+          </select>
         </div>
         <div v-if="regla.tipo === 'sin_reporte'">
           <label>Minutos sin contacto</label>
@@ -289,9 +330,13 @@ function minutosLegibles(m) {
           <label>Zona</label>
           <select v-model="regla.zona" required>
             <option value="" disabled>Elige una zona…</option>
-            <option v-for="z in zonas" :key="z.id" :value="z.id">{{ z.nombre }} (radio {{ distancia(z.radio_m) }})</option>
+            <option v-for="z in zonasRegla" :key="z.id" :value="z.id">{{ z.nombre }} (radio {{ distancia(z.radio_m) }})</option>
           </select>
           <span v-if="!zonas.length" class="apagado chico">Primero crea una zona, abajo.</span>
+          <span v-else-if="!zonasRegla.length" class="apagado chico">
+            Ninguna zona sirve para estos equipos: crea una abajo, de toda la organización o de su dominio.
+          </span>
+          <span v-else-if="eligeDominio" class="apagado chico">Solo las zonas de toda la organización o de su mismo dominio.</span>
         </div>
       </div>
       <p class="apagado chico" style="margin: 10px 0 0">{{ tiposRegla[regla.tipo].explica }}</p>
@@ -318,17 +363,17 @@ function minutosLegibles(m) {
             <div v-if="r.nombre && r.nombre !== tiposRegla[r.tipo]?.nombre" class="apagado chico">{{ tiposRegla[r.tipo]?.nombre }}</div>
           </td>
           <td data-t="Vigila">{{ describe(r) }}</td>
-          <td data-t="A quién">{{ r.grupo || 'todos los equipos' }}</td>
+          <td data-t="A quién">{{ r.dominio != null ? `los de ${r.dominio_nombre}` : 'todos los equipos' }}</td>
           <td data-t="Abiertas">
             <a v-if="r.abiertas" href="#/panel/alertas" class="nueva rojo">{{ r.abiertas }}</a>
             <span v-else class="apagado">0</span>
           </td>
           <td data-t="Activa">
-            <button v-if="puedeEditar" class="interruptor" :class="{ encendido: r.activa }" :aria-pressed="r.activa" :title="r.activa ? 'Apagar' : 'Encender'" @click="alternaRegla(r)"><span></span></button>
+            <button v-if="toca(r)" class="interruptor" :class="{ encendido: r.activa }" :aria-pressed="r.activa" :title="r.activa ? 'Apagar' : 'Encender'" @click="alternaRegla(r)"><span></span></button>
             <span v-else>{{ r.activa ? 'sí' : 'no' }}</span>
           </td>
           <td style="white-space: nowrap; text-align: right">
-            <template v-if="puedeEditar">
+            <template v-if="toca(r)">
               <button class="boton suave chico" @click="editaRegla(r)">Editar</button>
               <button class="boton chico" :class="confirmaRegla === r.id ? 'peligro' : 'suave'" style="margin-left: 6px" @click="borraRegla(r)">
                 {{ confirmaRegla === r.id ? '¿Seguro?' : 'Borrar' }}
@@ -372,6 +417,17 @@ function minutosLegibles(m) {
         <strong>{{ zona.id ? 'Editar zona' : 'Zona nueva' }}</strong>
         <label>Nombre</label>
         <input v-model="zona.nombre" maxlength="200" placeholder="Almacén central" required />
+        <template v-if="eligeDominio">
+          <label>De quién</label>
+          <select v-model="zona.dominio">
+            <option v-if="sinAcotar" :value="null">Toda la organización</option>
+            <option v-else value="" disabled>Elige un dominio…</option>
+            <option v-for="d in dominios" :key="d.id" :value="d.id">{{ d.nombre }}</option>
+          </select>
+          <span class="apagado chico">
+            {{ zona.dominio == null ? 'La ven todos y sirve para cualquier regla.' : 'Solo la ven quienes alcanzan ese dominio, y sirve para sus reglas.' }}
+          </span>
+        </template>
         <label>Radio</label>
         <input type="range" v-model.number="zona.radio_m" min="10" max="5000" step="10" />
         <div class="en-linea">
@@ -384,7 +440,7 @@ function minutosLegibles(m) {
         </p>
         <p v-if="errorZona" class="aviso" style="margin-top: 10px">{{ errorZona }}</p>
         <div class="en-linea" style="margin-top: 14px">
-          <button class="boton chico" :disabled="zona.lat == null || !zona.nombre.trim()">{{ zona.id ? 'Guardar' : 'Crear zona' }}</button>
+          <button class="boton chico" :disabled="zona.lat == null || !zona.nombre.trim() || zona.dominio === ''">{{ zona.id ? 'Guardar' : 'Crear zona' }}</button>
           <button type="button" class="boton suave chico" @click="cancelaZona">Cancelar</button>
         </div>
       </form>
@@ -392,14 +448,15 @@ function minutosLegibles(m) {
 
     <p v-if="!zonas.length && !editandoZona" class="apagado" style="margin-top: 12px">Todavía no hay zonas.</p>
     <table v-if="zonas.length" class="tarjetas" style="margin-top: 14px">
-      <thead><tr><th>Zona</th><th>Radio</th><th>Centro</th><th></th></tr></thead>
+      <thead><tr><th>Zona</th><th v-if="eligeDominio">De quién</th><th>Radio</th><th>Centro</th><th></th></tr></thead>
       <tbody>
         <tr v-for="z in zonas" :key="z.id">
           <td data-t="Zona"><strong>{{ z.nombre }}</strong></td>
+          <td v-if="eligeDominio" data-t="De quién">{{ z.dominio != null ? z.dominio_nombre : 'toda la organización' }}</td>
           <td data-t="Radio">{{ distancia(z.radio_m) }}</td>
           <td data-t="Centro" class="mono">{{ z.lat.toFixed(5) }}, {{ z.lng.toFixed(5) }}</td>
           <td style="white-space: nowrap; text-align: right">
-            <template v-if="puedeEditar">
+            <template v-if="toca(z)">
               <button class="boton suave chico" @click="editaZona(z)">Editar</button>
               <button class="boton chico" :class="confirmaZona === z.id ? 'peligro' : 'suave'" style="margin-left: 6px" @click="borraZona(z)">
                 {{ confirmaZona === z.id ? '¿Seguro?' : 'Borrar' }}

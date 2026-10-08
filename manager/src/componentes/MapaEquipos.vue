@@ -1,14 +1,15 @@
 <script setup>
 import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
-import { api, consulta, hace, fecha, distancia, estados, colorEquipo } from '../api.js'
+import { api, consulta, cargaDominios, hace, fecha, distancia, estados, colorEquipo } from '../api.js'
 import { creaMapa, circuloZona, colores, esc, L } from '../mapa.js'
 
 defineProps({ yo: Object })
 
 const equipos = ref([])
 const zonas = ref([])
-const grupos = ref([])
-const grupo = ref('')
+const dominios = ref([])
+const dominio = ref('')
+const variosDominios = computed(() => dominios.value.length > 1)
 const error = ref('')
 const elMapa = ref(null)
 let mapa = null
@@ -19,10 +20,14 @@ let encuadrado = false
 
 const conUbicacion = computed(() => equipos.value.filter((e) => e.lat != null))
 const sinUbicacion = computed(() => equipos.value.length - conUbicacion.value.length)
+// Con un dominio elegido, sus zonas y las de toda la organización.
+const zonasVisibles = computed(() =>
+  zonas.value.filter((z) => !dominio.value || z.dominio == null || String(z.dominio) === dominio.value),
+)
 
 async function carga() {
   try {
-    equipos.value = (await api.get('/v1/equipos' + consulta({ grupo: grupo.value }))).equipos
+    equipos.value = (await api.get('/v1/equipos' + consulta({ dominio: dominio.value }))).equipos
     error.value = ''
     pinta()
   } catch (e) {
@@ -50,7 +55,7 @@ function pinta() {
       .bindPopup(
         `<div class="popup-equipo">
            <strong>${esc(e.nombre)}</strong>${e.etiqueta ? ` · ${esc(e.etiqueta)}` : ''}<br>
-           <span>${esc(estados[e.estado])}${e.grupo ? ` · ${esc(e.grupo)}` : ''}</span><br>
+           <span>${esc(estados[e.estado])}${variosDominios.value && e.dominio_nombre ? ` · ${esc(e.dominio_nombre)}` : ''}</span><br>
            <span>${e.conectado ? 'Conectado ahora' : `Visto ${esc(hace(e.ultima_vez))}`}</span>
            ${e.bateria != null ? `<br><span>Batería ${e.bateria} %${e.cargando ? ', cargando' : ''}</span>` : ''}
            ${e.alertas ? `<br><span style="color:${c.mal}">${e.alertas} ${e.alertas === 1 ? 'alerta abierta' : 'alertas abiertas'}</span>` : ''}
@@ -68,7 +73,7 @@ function pinta() {
 function encuadra() {
   const puntos = [
     ...conUbicacion.value.map((e) => [e.lat, e.lng]),
-    ...zonas.value.map((z) => [z.lat, z.lng]),
+    ...zonasVisibles.value.map((z) => [z.lat, z.lng]),
   ]
   if (!puntos.length) return
   encuadrado = true
@@ -79,7 +84,7 @@ function encuadra() {
 function pintaZonas() {
   if (!capaZonas) return
   capaZonas.clearLayers()
-  for (const z of zonas.value) {
+  for (const z of zonasVisibles.value) {
     circuloZona(z)
       .bindTooltip(`${esc(z.nombre)} · radio ${esc(distancia(z.radio_m))}`, { sticky: true })
       .addTo(capaZonas)
@@ -90,18 +95,22 @@ onMounted(async () => {
   mapa = creaMapa(elMapa.value)
   capaZonas = L.layerGroup().addTo(mapa)
   capaEquipos = L.layerGroup().addTo(mapa)
-  try { zonas.value = (await api.get('/v1/zonas')).zonas } catch { /* sin zonas */ }
+  // Los dominios antes de pintar: el globo de cada equipo dice el suyo solo
+  // si hay más de uno.
+  const [z, d] = await Promise.allSettled([api.get('/v1/zonas'), cargaDominios()])
+  if (z.status === 'fulfilled') zonas.value = z.value.zonas
+  if (d.status === 'fulfilled') dominios.value = d.value
   pintaZonas()
   await carga()
-  api.get('/v1/grupos').then((d) => (grupos.value = d.grupos)).catch(() => {})
   reloj = setInterval(carga, 30000)
 })
 onUnmounted(() => {
   clearInterval(reloj)
   mapa?.remove()
 })
-watch(grupo, () => {
+watch(dominio, () => {
   encuadrado = false
+  pintaZonas()
   carga()
 })
 </script>
@@ -109,9 +118,9 @@ watch(grupo, () => {
 <template>
   <div class="cabecera-seccion">
     <h2>Mapa</h2>
-    <select v-model="grupo" style="width: auto; margin-left: auto" aria-label="Grupo">
-      <option value="">Todos los grupos</option>
-      <option v-for="g in grupos" :key="g.grupo" :value="g.grupo">{{ g.grupo }}</option>
+    <select v-if="variosDominios" v-model="dominio" style="width: auto; margin-left: auto" aria-label="Dominio">
+      <option value="">Todos los dominios</option>
+      <option v-for="d in dominios" :key="d.id" :value="String(d.id)">{{ d.nombre }}</option>
     </select>
   </div>
   <p v-if="error" class="aviso">{{ error }}</p>

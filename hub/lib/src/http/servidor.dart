@@ -14,6 +14,10 @@ import '../seguridad.dart';
 /// sesión en el panel, y un script con llave de API. Los dos pertenecen a una
 /// organización, y **de esa organización sale el filtro de toda consulta**:
 /// ninguna ruta acepta un `org` que venga del cuerpo.
+///
+/// Dentro de la organización, [dominios] acota todavía más: con lista, la
+/// sesión solo alcanza los equipos (y sus zonas, reglas, alertas y códigos)
+/// de esos dominios. Sale de la base, como el rol, y nunca del cuerpo.
 class Sesion {
   const Sesion({
     required this.org,
@@ -21,6 +25,7 @@ class Sesion {
     this.llave,
     this.rol = 'api',
     this.permisos = const {},
+    this.dominios,
   });
 
   final int org;
@@ -29,10 +34,19 @@ class Sesion {
   final String rol;
   final Set<String> permisos;
 
+  /// Los dominios que alcanza; null = toda la organización.
+  final List<int>? dominios;
+
   bool get esUsuario => usuario != null;
+  bool get acotada => dominios != null;
 
   /// Una llave con permiso `admin` vale lo mismo que una persona administradora.
-  bool get esAdmin => (esUsuario && rol == 'admin') || permisos.contains('admin');
+  /// Administrar es de toda la organización: una sesión acotada nunca lo es,
+  /// aunque la base dijera otra cosa.
+  bool get esAdmin => !acotada && ((esUsuario && rol == 'admin') || permisos.contains('admin'));
+
+  /// Si [dominio] está a su alcance.
+  bool alcanza(int? dominio) => dominios == null || (dominio != null && dominios!.contains(dominio));
 
   /// Lo que cada rol puede. `editor` maneja los equipos pero no a las
   /// personas ni las llaves; `consulta` solo mira.
@@ -379,19 +393,20 @@ class Servidor {
     if (usuario is! int || org is! int) return null;
     // El rol se lee de la base y no del JWT: bajar a alguien de admin a
     // consulta tiene que valer ya, no cuando venza su sesión de siete días.
+    // Lo mismo con sus dominios: quitarle uno corta el acceso en el acto.
     final u = await bd.fila(
-      'select rol from dt.usuario where id = @i and org = @o and clave_hash is not null',
+      'select rol, dominios from dt.usuario where id = @i and org = @o and clave_hash is not null',
       {'i': usuario, 'o': org},
     );
     if (u == null) return null;
-    return Sesion(org: org, usuario: usuario, rol: u['rol'] as String);
+    return Sesion(org: org, usuario: usuario, rol: u['rol'] as String, dominios: _alcance(u['dominios']));
   }
 
   Future<Sesion?> _sesionDeLlave(String credencial) async {
     final partes = Seguridad.partesCredencial(credencial);
     if (partes == null || partes[0] != 'dtk') return null;
     final fila = await bd.fila(
-      '''select id, org, clave_hash, permisos
+      '''select id, org, clave_hash, permisos, dominios
            from dt.llave
           where prefijo = @p and revocada is null''',
       {'p': partes[1]},
@@ -411,7 +426,14 @@ class Servidor {
       llave: fila['id'] as int,
       rol: 'api',
       permisos: ((fila['permisos'] as List?) ?? const []).map((p) => p.toString()).toSet(),
+      dominios: _alcance(fila['dominios']),
     );
+  }
+
+  /// La columna `dominios` como alcance: vacía es toda la organización.
+  static List<int>? _alcance(Object? v) {
+    final l = [for (final d in (v as List?) ?? const []) (d as num).toInt()];
+    return l.isEmpty ? null : l;
   }
 
   /// La credencial de un equipo (`dtd_`). La usan el reporte, el acuse de

@@ -2,6 +2,7 @@ import 'dart:io';
 
 import 'config.dart';
 import 'db.dart';
+import 'dominios.dart';
 import 'http/rutas_auth.dart';
 import 'http/rutas_llaves.dart';
 import 'http/rutas_panel.dart';
@@ -25,7 +26,8 @@ const ayudaCli = '''
   llave --org ID --nombre N         llave de API nueva; imprime la llave
         [--permisos leer,editar,ordenar,admin]
   alta --org ID --nombre N          código de alta nuevo; imprime el código y
-        [--grupo G] [--usos N]      el texto de su QR
+        [--dominio D] [--usos N]    el texto de su QR. D es el slug o el id
+                                    del dominio (sin él, el General)
 ''';
 
 Future<int> correCli(List<String> args, Config config, String migraciones) async {
@@ -102,17 +104,29 @@ Future<int> correCli(List<String> args, Config config, String migraciones) async
         final nombre = op['nombre'] ?? '';
         if (org == null || nombre.isEmpty) return _uso('alta --org ID --nombre N');
         final usos = int.tryParse(op['usos'] ?? '');
+        final pedido = op['dominio'] ?? '';
+        final dominio = pedido.isEmpty
+            ? await dominioGeneral(bd, org)
+            : (await bd.fila(
+                '''select id from dt.dominio
+                    where org = @o and (id::text = @v or slug = lower(@v))''',
+                {'o': org, 'v': pedido},
+              ))?['id'] as int?;
+        if (dominio == null) {
+          stderr.writeln('no hay un dominio «$pedido» en la organización $org');
+          return 1;
+        }
         final prefijo = Seguridad.hex(4);
         final secreto = Seguridad.token();
         await bd.ejecuta(
-          '''insert into dt.alta (org, nombre, prefijo, clave_hash, grupo, usos_max, creado_por)
-             values (@o, @n, @p, @h, @g, @u, 'consola')''',
+          '''insert into dt.alta (org, nombre, prefijo, clave_hash, dominio, usos_max, creado_por)
+             values (@o, @n, @p, @h, @d, @u, 'consola')''',
           {
             'o': org,
             'n': nombre,
             'p': prefijo,
             'h': Seguridad.hashToken(secreto),
-            'g': op['grupo'] ?? '',
+            'd': dominio,
             'u': usos,
           },
         );

@@ -1,6 +1,6 @@
 <script setup>
 import { ref, computed, onMounted, watch } from 'vue'
-import { api, puede, hace, fecha, detalleAlerta, tiposRegla } from '../api.js'
+import { api, cargaDominios, puede, hace, fecha, detalleAlerta, tiposRegla } from '../api.js'
 
 const props = defineProps({ yo: Object })
 const emit = defineEmits(['cambio'])
@@ -12,6 +12,8 @@ const cargando = ref(true)
 const cerrando = ref(null)
 const nota = ref('')
 const puedeCerrar = computed(() => puede(props.yo, 'editar'))
+// El dominio de cada equipo se dice solo si hay más de uno a la vista.
+const variosDominios = ref(false)
 
 async function carga() {
   try {
@@ -23,7 +25,10 @@ async function carga() {
     cargando.value = false
   }
 }
-onMounted(carga)
+onMounted(() => {
+  carga()
+  cargaDominios().then((d) => (variosDominios.value = d.length > 1)).catch(() => {})
+})
 watch(todas, carga)
 
 function abreCierre(a) {
@@ -66,7 +71,7 @@ const nombreRegla = (a) => a.regla_nombre || tiposRegla[a.tipo]?.nombre || a.tip
           <td data-t="Equipo">
             <span class="punto" :class="a.cerrada ? '' : 'mal'" style="display: inline-block; margin-right: 6px"></span>
             <a :href="`#/panel/equipos/${a.equipo}`"><strong>{{ a.equipo_nombre }}</strong></a>
-            <div class="apagado chico">{{ [a.etiqueta, a.grupo].filter(Boolean).join(' · ') }}</div>
+            <div class="apagado chico">{{ [a.etiqueta, variosDominios && a.dominio_nombre].filter(Boolean).join(' · ') }}</div>
           </td>
           <td data-t="Regla">
             {{ nombreRegla(a) }}
