@@ -1,7 +1,85 @@
 # device-track
 
-Que ningún equipo se pierda: sabes cuáles tienes, dónde están, si siguen vivos
-y quién los está usando. Y al que no aparece lo haces sonar desde el panel.
+**Una página web donde ves todos los teléfonos y terminales Android de tu
+empresa: cuáles tienes, dónde están, si siguen funcionando y quién los está
+usando. Y si uno se pierde, lo haces sonar desde la página para encontrarlo.**
+
+Software libre y gratis (licencia Apache 2.0): lo instalas en tu propio servidor.
+
+![La lista de equipos: nombre, a quién está asignado, si está conectado, batería y red](docs/img/equipos.jpg)
+
+## ¿Para qué sirve?
+
+Una empresa tiene 20, 50 o 200 equipos Android: las terminales del almacén, los
+teléfonos de los repartidores, las tabletas de la tienda. Con el tiempo pasa
+siempre lo mismo:
+
+* nadie sabe bien cuántos hay ni quién tiene cuál;
+* uno deja de funcionar y nadie se entera hasta que hace falta;
+* uno se pierde entre los estantes del almacén, o se queda en la casa de alguien;
+* se descargan y nadie los pone a cargar.
+
+device-track resuelve eso con dos cosas: **una app pequeña en cada equipo** y
+**una página web** donde los ves todos juntos.
+
+## ¿Cómo funciona?
+
+1. **Instalas la app en el equipo y escaneas un código QR** que te da la
+   página. Eso es todo: el equipo aparece en la lista.
+2. **Cada 10 minutos el equipo cuenta cómo está**: cuánta batería tiene, a qué
+   red está conectado, cuánto espacio le queda, qué apps tiene instaladas y,
+   si tú lo pides, dónde está. Lo hace solo, con la pantalla apagada y sin que
+   nadie toque nada.
+3. **Tú lo ves en la página**: la lista, el mapa, y un aviso cuando algo va mal.
+
+## ¿Qué puedes hacer desde la página?
+
+* **Ver todos tus equipos**, en una lista o en un mapa, y saber cuál está
+  conectado ahora y cuándo dio señales por última vez cada uno.
+* **Hacerlo sonar**: suena a todo volumen aunque esté en silencio, hasta que
+  alguien lo toque. Para encontrarlo cuando no aparece.
+* **Mandarle un mensaje** que sale en su pantalla: «Devuelve este equipo a la
+  oficina».
+* **Ver por dónde anduvo** en el día.
+* **Recibir avisos** cuando un equipo se queda sin batería, lleva una hora sin
+  dar señales, sale del almacén o lo apagan.
+* **Llevar el inventario**: a quién está asignado cada uno, su número de activo
+  fijo, su número de serie, en qué grupo está.
+
+![El mapa con los equipos y las zonas](docs/img/mapa.jpg)
+
+![La ficha de un equipo: su estado, sus datos, por dónde anduvo y los botones para hacerlo sonar o mandarle un mensaje](docs/img/equipo.jpg)
+
+<p>
+  <img src="docs/img/celular.jpg" alt="La lista de equipos en el celular" width="260">
+  &nbsp;
+  <img src="docs/img/agente.jpg" alt="La app en el equipo: a dónde reporta y cuándo fue el último reporte" width="300">
+</p>
+
+La página también funciona en el celular (izquierda). A la derecha, la app que
+va en cada equipo: dice a dónde reporta y cuándo fue la última vez.
+
+## Lo que NO hace
+
+* **No espía.** El equipo muestra siempre un aviso fijo que dice que tiene
+  seguimiento y a dónde reporta. La empresa decide si pide la ubicación, y el
+  historial se borra solo (a los 90 días, o lo que la empresa diga).
+* **No bloquea, no borra y no encierra el equipo en una sola app.** Eso es otra
+  cosa (administración de dispositivos, MDM) y se hace con Android Enterprise.
+  device-track sabe dónde está el equipo y le habla; no lo gobierna.
+
+## ¿Cómo lo uso?
+
+* **Para probarlo o usarlo en tu empresa**: monta tu propio servidor, con
+  Docker en dos comandos (abajo). Es tuyo: los datos no salen de tu servidor.
+* **Si tienes tu propia app Flutter**, no hace falta instalar la app aparte:
+  mete el plugin y tu app reporta sola (más abajo).
+* **Si tienes otro sistema** (un ERP, un inventario), todo lo que hace la
+  página se puede hacer por API: [docs/api.md](docs/api.md).
+
+---
+
+## Para quien lo monta
 
 ```
   Equipos                              Hub                         Tú
@@ -11,38 +89,25 @@ y quién los está usando. Y al que no aparece lo haces sonar desde el panel.
                          WebSocket   alertas  ─────────────► webhook
 ```
 
-## Qué resuelve
+Tres piezas: el **hub** (el servidor, en Dart, con Postgres), el **panel** (la
+página web, la sirve el mismo hub) y lo que va en el equipo: el **agente** (una
+app Android aparte, para cualquier equipo) o el **plugin** dentro de tu app
+Flutter. Si un teléfono tiene las dos, es un solo equipo con dos fuentes.
 
-* **El inventario que nadie lleva.** Cada equipo se da de alta escaneando un
-  código QR. Queda con su modelo, su número de serie, a qué grupo pertenece y a
-  quién está asignado, y le pones la etiqueta de activo fijo.
-* **Saber si sigue vivo.** Cada diez minutos el equipo reporta batería, red,
-  espacio libre, las apps que tiene y —si la organización lo pide— su
-  ubicación. Con el teléfono dormido también: es lo que Android deja.
-* **Encontrar el que se perdió.** «Hacer sonar» lo pone a sonar a todo volumen
-  aunque esté en silencio. «Mostrar mensaje» le pone un aviso en pantalla
-  («Devuelve este equipo a la oficina»). Y el mapa dice dónde estuvo hoy.
-* **Enterarte antes que nadie.** Reglas: el equipo que pasa una hora sin
-  reportar, el que se quedó sin batería, el que salió del almacén, el que se
-  apagó. Avisan en el panel y por webhook, firmado, a tu sistema.
-* **Sin instalar nada si ya tienes una app.** Las apps Flutter meten el plugin y
-  reportan solas. Para los demás equipos está el agente, una app aparte. Si un
-  teléfono tiene las dos, es UN equipo con dos fuentes.
-
-## Cómo llega un equipo
+### Cómo llega un equipo
 
 1. En el panel, **Códigos de alta → Crear**. Sale un código (`dta_…`) y su QR.
    El código solo sirve para dar de alta equipos en tu organización; ponle tope
    de usos y vencimiento.
-2. En el equipo, instala el agente (en el hub de Chalona:
-   https://apk.chalonasoft.com/i/devicetrack) y escanea el QR; en una Zebra, con
-   el lector. O tu app trae el código compilado y se da de alta sola al abrir.
+2. En el equipo, instala el agente y escanea el QR; en una Zebra, con el lector.
+   O tu app trae el código compilado y se da de alta sola al abrir. El agente
+   compilado se puede bajar de https://apk.chalonasoft.com/i/devicetrack (habla
+   con el hub que diga el QR); para compilar el tuyo, ver
+   [agente/README.md](agente/README.md).
 3. El hub le devuelve al equipo su propia credencial (`dtd_…`) y desde ahí
    reporta y escucha órdenes.
 
-Todo lo que hace el panel se puede hacer por API: ver [docs/api.md](docs/api.md).
-
-## Levantar tu propio hub
+### Levantar tu propio hub
 
 ```bash
 docker compose up -d
@@ -89,7 +154,7 @@ para que se pueda mandar directo a un archivo sin que pase por la pantalla.
 Con nginx delante: `hub/nginx-hub.conf` (límites de peticiones y el
 WebSocket). Con systemd: `hub/deploy-hub.sh`.
 
-## Cómo está armado
+### Cómo está armado
 
 | Carpeta | Qué hay |
 |---|---|
@@ -102,7 +167,7 @@ WebSocket). Con systemd: `hub/deploy-hub.sh`.
 | `cliente/dart/` | El protocolo del equipo en Dart puro (`device_track`), para servidores y otras plataformas |
 | `android-comun/` | El Kotlin que comparten el agente y el plugin |
 
-## Meterlo en tu app Flutter
+### Meterlo en tu app Flutter
 
 ```dart
 final equipos = DeviceTrack(
@@ -118,25 +183,6 @@ Se da de alta la primera vez, reporta mientras la app está abierta y atiende
 declara y la pide la app. Todo en
 [cliente/flutter/README.md](cliente/flutter/README.md).
 
-## Privacidad
-
-device-track sabe dónde está un equipo. Eso es justo lo que se quiere con una
-terminal de almacén y es delicado con el teléfono de una persona:
-
-* El agente lleva siempre una notificación fija que dice de quién es el equipo
-  y que reporta su ubicación.
-* La organización decide si se pide la ubicación (`ubicacion` en su
-  configuración). Apagada, el equipo no la manda y el hub no la guardaría.
-* El historial se borra solo a los `dias_historial` (90 por defecto).
-
-No es un sistema para seguir a nadie a escondidas, y no se va a convertir en
-uno.
-
-## Lo que NO hace
-
-Bloquear o borrar un equipo a distancia, o encerrarlo en una sola app (modo
-quiosco). Eso es administración de dispositivos (MDM) y se hace con Android
-Enterprise. device-track sabe dónde está el equipo y le habla; no lo gobierna.
 
 ## Seguridad
 
