@@ -6,6 +6,17 @@ usando. Y si uno se pierde, lo haces sonar desde la página para encontrarlo.**
 
 Software libre y gratis (licencia Apache 2.0): lo instalas en tu propio servidor.
 
+> **In English:** device-track is a free, self-hosted web panel to keep track of
+> your company's Android phones and rugged terminals: which ones you have, where
+> they are, whether they are still working and who is using them. A small app on
+> each device reports battery, network, free storage, installed apps and
+> (optionally) location every 10 minutes. From the panel you see them on a list
+> and on a map, get alerts (low battery, silent for an hour, left the warehouse,
+> switched off), and can make a lost device ring at full volume or show a message
+> on its screen. Flutter apps can report through a plugin, without the extra app.
+> It never tracks in secret: the device always shows a notification saying it is
+> being tracked. The rest of this documentation is in Spanish.
+
 ![La lista de equipos: nombre, a quién está asignado, si está conectado, batería y red](docs/img/equipos.jpg)
 
 ## ¿Para qué sirve?
