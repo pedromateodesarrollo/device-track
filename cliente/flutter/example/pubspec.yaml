@@ -1,0 +1,19 @@
+name: device_track_example
+description: App mínima que usa device_track_flutter — pide el código de alta y enseña lo que reporta.
+publish_to: none
+version: 1.0.0+1
+
+environment:
+  sdk: ^3.5.0
+
+dependencies:
+  flutter:
+    sdk: flutter
+  device_track_flutter:
+    path: ../
+
+dev_dependencies:
+  flutter_lints: ^5.0.0
+
+flutter:
+  uses-material-design: true

@@ -1,0 +1,38 @@
+# Un hub funcionando en dos minutos: Postgres + el hub.
+#
+#   docker compose up -d
+#   docker compose exec hub ./device-track-hub org --nombre "Mi empresa" --correo tu@correo.com
+#   → abre el enlace que imprime y pon tu clave (http://localhost:3140)
+#
+# Para producción: cambia DT_SECRETO_JWT (si no, cada reinicio cierra la
+# sesión de todos), pon DT_URL_PUBLICA con tu dominio (va en el QR de los
+# códigos de alta) y Postgres donde lo tengas.
+
+services:
+  bd:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: dt
+      POSTGRES_PASSWORD: dt
+      POSTGRES_DB: device_track
+    volumes:
+      - datos:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U dt']
+      interval: 5s
+      retries: 10
+
+  hub:
+    build: { context: ., dockerfile: hub/Dockerfile }
+    depends_on:
+      bd: { condition: service_healthy }
+    environment:
+      DT_DATABASE_URL: postgres://dt:dt@bd:5432/device_track?sslmode=disable
+      DT_PUERTO: '3140'
+      DT_SECRETO_JWT: cambia-esto-en-produccion
+      DT_URL_PUBLICA: http://localhost:3140
+    ports:
+      - '3140:3140'
+
+volumes:
+  datos:

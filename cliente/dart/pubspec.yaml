@@ -1,0 +1,13 @@
+name: device_track
+description: Cliente Dart de device-track — alta del equipo, reporte, acuse de órdenes y el WebSocket del hub. Sin Flutter ni dependencias.
+version: 0.1.0
+publish_to: none
+
+environment:
+  sdk: ^3.5.0
+
+# Sin dependencias: HTTP y WebSocket los da dart:io.
+
+dev_dependencies:
+  test: ^1.24.0
+  lints: ^4.0.0

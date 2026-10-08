@@ -1,0 +1,7 @@
+# Lo que se reconstruye: dependencias y compilados. Los lockfiles (el del hub
+# y el del panel) SÍ se versionan: lo que se despliega tiene que poder
+# reconstruirse igual dentro de un año.
+node_modules/
+dist/
+.dart_tool/
+build/

@@ -1,0 +1,31 @@
+name: device_track_flutter
+description: device-track en una app Flutter — se da de alta sola, reporta mientras la app está abierta y atiende las órdenes del panel (sonar, reportar, mensaje).
+version: 0.1.0
+publish_to: none
+
+environment:
+  sdk: ^3.5.0
+  flutter: '>=3.24.0'
+
+dependencies:
+  flutter:
+    sdk: flutter
+  # El protocolo (alta, reporte, órdenes, WebSocket), en Dart puro, en esta
+  # misma carpeta del repositorio.
+  device_track:
+    path: ../dart
+
+dev_dependencies:
+  flutter_lints: ^5.0.0
+  flutter_test:
+    sdk: flutter
+
+# Plugin solo en Android: lee el equipo con el mismo Kotlin que el agente
+# (android-comun) y guarda la credencial y la cola en el almacenamiento de la
+# app. En otra plataforma el canal no existe y DeviceTrack se queda quieto.
+flutter:
+  plugin:
+    platforms:
+      android:
+        package: com.chalonasoft.devicetrack.plugin
+        pluginClass: DeviceTrackPlugin

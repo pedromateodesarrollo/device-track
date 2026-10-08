@@ -1,0 +1,17 @@
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
+    <!-- Se funden en el manifiesto de cada app que use el plugin: ninguna
+         tiene que declararlos.
+
+         INTERNET y ACCESS_NETWORK_STATE: hablar con el hub y decir por qué red
+         va el equipo.
+         QUERY_ALL_PACKAGES: la lista de apps instaladas del inventario. Play
+         la restringe; las apps de la casa no van a Play.
+
+         La ubicación NO va aquí: la declara y la pide cada app que la quiera
+         (ver README.md). Sin ella el plugin reporta todo lo demás. -->
+    <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+    <uses-permission android:name="android.permission.QUERY_ALL_PACKAGES"
+        tools:ignore="QueryAllPackagesPermission" />
+</manifest>
