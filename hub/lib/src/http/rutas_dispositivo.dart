@@ -130,16 +130,18 @@ void registraRutasDispositivo(Servidor s, Ordenes ordenes, Alertas alertas) {
       final prefijo = Seguridad.hex(4);
       final secreto = Seguridad.token();
       await tx.ejecuta(
-        '''insert into dt.fuente (equipo, tipo, paquete, version, build, prefijo, clave_hash)
-           values (@e, @t, @p, @v, @b, @pre, @h)
+        '''insert into dt.fuente (equipo, tipo, paquete, nombre, version, build, prefijo, clave_hash)
+           values (@e, @t, @p, @n, @v, @b, @pre, @h)
            on conflict (equipo, paquete) do update
               set tipo = excluded.tipo, version = excluded.version, build = excluded.build,
+                  nombre = coalesce(nullif(excluded.nombre, ''), dt.fuente.nombre),
                   prefijo = excluded.prefijo, clave_hash = excluded.clave_hash,
                   revocada = null, ultima_vez = now()''',
         {
           'e': equipo!['id'],
           't': tipo,
           'p': paquete,
+          'n': _texto(fuente['nombre'], 100),
           'v': _texto(fuente['version'], 50),
           'b': _entero(fuente['build'], 0, 1 << 31),
           'pre': prefijo,
@@ -270,12 +272,14 @@ void registraRutasDispositivo(Servidor s, Ordenes ordenes, Alertas alertas) {
       await tx.ejecuta(
         '''update dt.fuente set
               ultima_vez = now(),
+              nombre = coalesce(nullif(@n, ''), nombre),
               version = coalesce(nullif(@v, ''), version),
               build = coalesce(@b, build),
               contexto = case when @hayc then @c else contexto end
             where id = @f''',
         {
           'f': e.fuente,
+          'n': _texto(fuente['nombre'], 100),
           'v': _texto(fuente['version'], 50),
           'b': _entero(fuente['build'], 0, 1 << 31),
           'hayc': contextoOk,

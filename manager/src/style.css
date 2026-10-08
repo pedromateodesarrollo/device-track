@@ -338,6 +338,25 @@ a.nueva:hover { text-decoration: none; filter: brightness(1.1); }
 .tabla-equipos tbody tr { cursor: pointer; }
 .tabla-equipos tbody tr:hover { background: var(--fondo-2); }
 .tabla-equipos td { vertical-align: middle; }
+
+/* Encabezados que ordenan: todo el encabezado es el botón. */
+th.ordenable { padding: 0; white-space: nowrap; }
+th.ordenable button {
+  display: inline-flex; align-items: center; gap: 5px; width: 100%; padding: 8px 10px;
+  background: none; border: 0; border-radius: 0; cursor: pointer; text-align: left;
+  font: inherit; color: inherit; text-transform: inherit; letter-spacing: inherit;
+}
+th.ordenable button:hover { color: var(--texto); }
+th.ordenable button:focus-visible { outline: 2px solid var(--marca); outline-offset: -2px; }
+th.ordenable .flecha { font-size: 10px; opacity: .35; }
+th.ordenable[aria-sort="ascending"], th.ordenable[aria-sort="descending"] { color: var(--texto); }
+th.ordenable[aria-sort="ascending"] .flecha, th.ordenable[aria-sort="descending"] .flecha { opacity: 1; color: var(--marca); }
+
+/* En el teléfono no hay encabezados: un selector y un botón para el sentido. */
+.ordenar-angosto { display: none; gap: 8px; align-items: center; flex-wrap: wrap; }
+@media (max-width: 1023px) {
+  .ordenar-angosto { display: inline-flex; }
+}
 tr.retirado, a.retirado { opacity: .55; }
 tr.cerrada { opacity: .6; }
 table.tarjetas td { vertical-align: middle; }

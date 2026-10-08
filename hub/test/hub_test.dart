@@ -88,11 +88,11 @@ void main() {
   }
 
   Future<Map<String, dynamic>> alta(String codigo, String huella,
-      {String tipo = 'agente', String paquete = 'com.chalonasoft.devicetrack'}) async {
+      {String tipo = 'agente', String paquete = 'com.chalonasoft.devicetrack', String? nombre}) async {
     final (st, d) = await pide('POST', '/v1/alta',
         json: {
           'huella': huella,
-          'fuente': {'tipo': tipo, 'paquete': paquete, 'version': '0.1.0', 'build': 1},
+          'fuente': {'tipo': tipo, 'paquete': paquete, 'version': '0.1.0', 'build': 1, 'nombre': ?nombre},
           'equipo': {'modelo': 'TC51', 'fabricante': 'Zebra', 'android': 30},
         },
         token: codigo);
@@ -147,6 +147,43 @@ void main() {
     expect(st2, 401);
     (st2, _) = await pide('POST', '/v1/reporte', json: {'bateria': 50}, token: otra['credencial'] as String);
     expect(st2, 200);
+  });
+
+  test('la aplicación que reporta: su nombre, o el de la lista de apps', () async {
+    final c = await codigo();
+    // Una app de antes de `fuente.nombre`: el nombre sale de la lista de apps.
+    final vieja = await alta(c, 'huella-nombre-app', tipo: 'app', paquete: 'com.ejemplo.inventario');
+    final cred = vieja['credencial'] as String;
+    var (st, d) = await pide('POST', '/v1/reporte',
+        json: {
+          'apps': [
+            {'paquete': 'com.ejemplo.inventario', 'version': '1.0.0', 'build': 1, 'nombre': 'Inventario viejo'},
+          ],
+        },
+        token: cred);
+    expect(st, 200, reason: '$d');
+    Future<Map<String, dynamic>> fuente() async {
+      final (_, l) = await pide('GET', '/v1/equipos?q=huella-nombre-app', token: admin);
+      return Map<String, dynamic>.from((l['equipos'] as List).single['fuentes'].single as Map);
+    }
+
+    expect((await fuente())['nombre'], 'Inventario viejo');
+
+    // La que lo manda gana, y un reporte sin él no lo borra.
+    (st, d) = await pide('POST', '/v1/reporte',
+        json: {'fuente': {'tipo': 'app', 'paquete': 'com.ejemplo.inventario', 'nombre': 'Inventario', 'version': '2.0.0'}},
+        token: cred);
+    expect(st, 200, reason: '$d');
+    await pide('POST', '/v1/reporte', json: {'fuente': {'version': '2.0.1'}}, token: cred);
+    final f = await fuente();
+    expect(f['nombre'], 'Inventario');
+    expect(f['version'], '2.0.1');
+
+    // En el alta también, y en la ficha.
+    final ag = await alta(c, 'huella-nombre-app', nombre: 'device-track');
+    final (_, e) = await pide('GET', '/v1/equipos/${ag['equipo']['id']}', token: admin);
+    expect({for (final x in e['fuentes'] as List) x['paquete']: x['nombre']},
+        {'com.chalonasoft.devicetrack': 'device-track', 'com.ejemplo.inventario': 'Inventario'});
   });
 
   test('códigos de alta: tope de usos, anulado, y no abren el panel', () async {

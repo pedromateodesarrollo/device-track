@@ -186,13 +186,20 @@ object Lectura {
         MessageDigest.getInstance("SHA-256").digest(apps.toString().toByteArray())
             .joinToString("") { "%02x".format(it) }
 
-    /** versionName y versionCode de quien reporta. */
+    /**
+     * Quién reporta: su applicationId, el nombre que se ve en el lanzador
+     * («WMS Duralon»; el panel lo enseña en la columna «Aplicación»),
+     * versionName y versionCode.
+     */
     fun fuente(context: Context, tipo: String): JSONObject {
-        val info = context.packageManager.getPackageInfo(context.packageName, 0)
+        val pm = context.packageManager
+        val info = pm.getPackageInfo(context.packageName, 0)
         val build = if (Build.VERSION.SDK_INT >= 28) info.longVersionCode else @Suppress("DEPRECATION") info.versionCode.toLong()
+        val nombre = try { context.applicationInfo.loadLabel(pm).toString().trim() } catch (_: Exception) { "" }
         return JSONObject()
             .put("tipo", tipo)
             .put("paquete", context.packageName)
+            .put("nombre", nombre)
             .put("version", info.versionName ?: "")
             .put("build", build)
     }

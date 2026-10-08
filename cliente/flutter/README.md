@@ -88,7 +88,8 @@ red Wi-Fi.
 ## Qué hace solo
 
 * **Alta.** La primera vez se da de alta con el código, como fuente `app` con el
-  `applicationId` de la app, y guarda la credencial (`dtd_…`) en las
+  `applicationId` y el nombre de la app (el del lanzador: el panel lo enseña en
+  la columna «Aplicación»), y guarda la credencial (`dtd_…`) en las
   preferencias privadas de la app. Vuelve a darse de alta si el hub rechaza la
   credencial (401: otra instalación la reemplazó o borraron el equipo), si la
   app cambia de hub o si una copia de seguridad trajo la credencial de otro

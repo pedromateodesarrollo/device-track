@@ -72,8 +72,8 @@ void registraRutasPanel(Servidor s, Canal canal, Ordenes ordenes, Alertas alerta
       '''select ${_columnasEquipo('e')},
                 (select count(*) from dt.alerta a where a.equipo = e.id and a.cerrada is null) as alertas,
                 (select coalesce(jsonb_agg(jsonb_build_object(
-                          'tipo', f.tipo, 'paquete', f.paquete, 'version', f.version,
-                          'ultima_vez', f.ultima_vez, 'contexto', f.contexto)
+                          'tipo', f.tipo, 'paquete', f.paquete, 'nombre', ${_nombreFuente('f', 'e')},
+                          'version', f.version, 'ultima_vez', f.ultima_vez, 'contexto', f.contexto)
                         order by f.ultima_vez desc), '[]'::jsonb)
                    from dt.fuente f where f.equipo = e.id and f.revocada is null) as fuentes
            from dt.equipo e
@@ -94,8 +94,10 @@ void registraRutasPanel(Servidor s, Canal canal, Ordenes ordenes, Alertas alerta
     );
     if (e == null) return _noEsta();
     final fuentes = await p.bd.filas(
-      '''select id, tipo, paquete, version, build, contexto, creado, ultima_vez, revocada
-           from dt.fuente where equipo = @i order by ultima_vez desc''',
+      '''select f.id, f.tipo, f.paquete, ${_nombreFuente('f', 'e')} as nombre, f.version, f.build,
+                f.contexto, f.creado, f.ultima_vez, f.revocada
+           from dt.fuente f join dt.equipo e on e.id = f.equipo
+          where f.equipo = @i order by f.ultima_vez desc''',
       {'i': id},
     );
     final alertasAbiertas = await p.bd.filas(
@@ -746,6 +748,15 @@ String _columnasEquipo(String t) => [
       'bateria', 'cargando', 'red_tipo', 'red_ssid', 'lat', 'lng', 'precision_m', 'ubicacion_t',
       'almacenamiento_libre', 'almacenamiento_total',
     ].map((c) => '$t.$c').followedBy(['(select nombre from dt.dominio where id = $t.dominio) as dominio_nombre']).join(', ');
+
+/// El nombre de la app de la fuente [f]: el que ella manda (`fuente.nombre`)
+/// o, si es de antes de mandarlo, el de su paquete en la lista de apps
+/// instaladas del equipo [e]. Vacío si ninguno lo sabe: el panel enseña el
+/// paquete.
+String _nombreFuente(String f, String e) => '''coalesce(nullif($f.nombre, ''),
+      (select a->>'nombre' from jsonb_array_elements(
+                case when jsonb_typeof($e.apps) = 'array' then $e.apps else '[]'::jsonb end) a
+        where a->>'paquete' = $f.paquete limit 1), '')''';
 
 const _columnasZona = '''id, nombre, lat, lng, radio_m, dominio,
     (select nombre from dt.dominio where id = dt.zona.dominio) as dominio_nombre, creado''';

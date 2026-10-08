@@ -156,14 +156,19 @@ class Alta {
   String toString() => 'Alta(equipo $equipoId «$equipoNombre», $config)';
 }
 
-/// Quién reporta: `{tipo, paquete, version, build}`.
+/// Quién reporta: `{tipo, paquete, nombre, version, build}`.
 class Fuente {
-  const Fuente({required this.tipo, required this.paquete, this.version, this.build});
+  const Fuente({required this.tipo, required this.paquete, this.nombre, this.version, this.build});
 
   final TipoFuente tipo;
 
   /// El `applicationId` (en otra plataforma, lo que identifique a la app).
   final String paquete;
+
+  /// El nombre de la app como lo ve la gente («WMS Duralon»). El panel lo
+  /// enseña en la columna «Aplicación» de la lista de equipos; sin él, enseña
+  /// el [paquete].
+  final String? nombre;
 
   /// `versionName`.
   final String? version;
@@ -176,6 +181,7 @@ class Fuente {
     return Fuente(
       tipo: TipoFuente.values.firstWhere((t) => t.name == m['tipo'], orElse: () => tipo),
       paquete: m['paquete']?.toString() ?? '',
+      nombre: _textoONull(m['nombre']),
       version: _textoONull(m['version']),
       build: _entero(m['build']),
     );
@@ -184,6 +190,7 @@ class Fuente {
   Map<String, Object?> toJson() => {
         'tipo': tipo.name,
         'paquete': paquete,
+        if (nombre != null) 'nombre': nombre,
         if (version != null) 'version': version,
         if (build != null) 'build': build,
       };
@@ -365,7 +372,8 @@ class Reporte {
   /// `reportes`.
   final List<Reporte> atrasados;
 
-  /// `version` y `build` de quien reporta: el hub los actualiza en su fuente.
+  /// `nombre`, `version` y `build` de quien reporta: el hub los actualiza en
+  /// su fuente.
   final Fuente? fuente;
 
   /// Nivel de SDK (va en `equipo.android`): cambia cuando el equipo se

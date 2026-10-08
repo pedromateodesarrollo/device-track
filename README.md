@@ -60,6 +60,10 @@ device-track resuelve eso con dos cosas: **una app pequeña en cada equipo** y
   a quién dejas ver cuáles. El encargado de un cliente ve los suyos; tú, todos.
 * **Saber quién lo tenía**: si la app que corre en el equipo dice quién tiene la
   sesión, el panel enseña el último usuario de cada uno, y su almacén.
+* **Saber qué app reporta**: cada equipo dice en la lista qué aplicación lo
+  reportó por última vez (el agente o una app con el plugin) y su versión.
+* **Ordenar la lista por cualquier columna**: un clic en el encabezado, otro
+  para invertir; en el celular, con un selector. El orden se recuerda.
 * **Invitar por correo**: cada organización pone su propio correo de salida
   (SMTP) en el panel y las invitaciones le llegan a cada persona. Sin él, la
   invitación es un enlace que compartes tú.

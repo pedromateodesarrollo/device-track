@@ -2,6 +2,15 @@
 
 ## Sin publicar
 
+* **La aplicación que reporta.** La fuente manda el nombre de la app
+  (`fuente.nombre`, la etiqueta del lanzador) en el alta y en cada reporte; el
+  agente y el plugin lo hacen solos. La lista de equipos tiene la columna
+  «Aplicación»: la fuente que reportó más reciente, con su versión y las demás
+  debajo. Una app de antes, que no lo manda, sale con el nombre que tenga en la
+  lista de apps del equipo. Migración 0004.
+* **La lista de equipos se ordena por cualquier columna** (clic en el
+  encabezado; en el celular, un selector). Lo vacío va siempre al final y el
+  orden se recuerda en el navegador.
 * **Dominios** en lugar de grupos: agrupan equipos dentro de la organización
   (un cliente, un almacén) y acotan a quién los ve. Una persona o una llave
   limitada a unos dominios solo ve y maneja sus equipos, códigos de alta,

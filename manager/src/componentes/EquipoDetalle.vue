@@ -566,6 +566,7 @@ const apps = computed(() => e.value?.apps || [])
         <div v-for="f in fuentesVivas" :key="f.id" class="fuente">
           <div class="en-linea">
             <span class="nueva" :class="f.tipo === 'agente' ? '' : 'gris'">{{ f.tipo }}</span>
+            <strong v-if="f.nombre">{{ f.nombre }}</strong>
             <code>{{ f.paquete }}</code>
             <span class="apagado chico">{{ f.version }}<template v-if="f.build"> ({{ f.build }})</template></span>
             <span class="apagado chico" style="margin-left: auto" :title="fecha(f.ultima_vez)">{{ hace(f.ultima_vez) }}</span>
@@ -578,7 +579,7 @@ const apps = computed(() => e.value?.apps || [])
         </div>
       </div>
       <p v-if="fuentesRevocadas.length" class="apagado chico" style="margin-top: 8px">
-        Revocadas: <code v-for="f in fuentesRevocadas" :key="f.id" style="margin-right: 6px">{{ f.paquete }}</code>
+        Revocadas: <code v-for="f in fuentesRevocadas" :key="f.id" style="margin-right: 6px" :title="f.nombre">{{ f.paquete }}</code>
       </p>
 
       <details class="apps" v-if="apps.length">

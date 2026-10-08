@@ -25,7 +25,7 @@ import java.util.concurrent.RejectedExecutionException
  *
  * Leer el equipo:
  * - `equipo` → `{huella, modelo, fabricante, android, serie?}`.
- * - `fuente` → `{tipo: app, paquete, version, build}` de la app que lo usa.
+ * - `fuente` → `{tipo: app, paquete, nombre, version, build}` de la app que lo usa.
  * - `estado` → `{bateria, cargando, red: {tipo, ssid?}, almacenamiento: {libre, total}}`.
  * - `ubicacion {plazo_ms}` → `{lat, lng, precision_m, t}`, o null si la app no
  *   tiene el permiso o no llegó ninguna a tiempo.

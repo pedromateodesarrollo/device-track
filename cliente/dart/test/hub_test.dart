@@ -20,7 +20,8 @@ void main() {
       final a = await hub.alta(
         codigo: ' ${falso.codigo} ',
         huella: 'a1b2c3d4',
-        fuente: const Fuente(tipo: TipoFuente.app, paquete: 'com.ejemplo.inventario', version: '1.2.0', build: 12),
+        fuente: const Fuente(
+            tipo: TipoFuente.app, paquete: 'com.ejemplo.inventario', nombre: 'Inventario', version: '1.2.0', build: 12),
         equipo: const DatosEquipo(modelo: 'TC51', fabricante: 'Zebra', android: 27, serie: 'S123'),
       );
       expect(a.credencial, falso.credencial);
@@ -33,7 +34,13 @@ void main() {
       expect(falso.cabeceras.single, 'POST /v1/alta ${falso.codigo}');
       expect(falso.altas.single, {
         'huella': 'a1b2c3d4',
-        'fuente': {'tipo': 'app', 'paquete': 'com.ejemplo.inventario', 'version': '1.2.0', 'build': 12},
+        'fuente': {
+          'tipo': 'app',
+          'paquete': 'com.ejemplo.inventario',
+          'nombre': 'Inventario',
+          'version': '1.2.0',
+          'build': 12,
+        },
         'equipo': {'modelo': 'TC51', 'fabricante': 'Zebra', 'android': 27, 'serie': 'S123'},
       });
       hub.cerrar();

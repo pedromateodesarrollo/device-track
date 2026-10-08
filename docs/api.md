@@ -98,6 +98,7 @@ el alta desde la misma fuente revoca la credencial anterior de esa fuente.
 | `huella` | texto | sí | El `ANDROID_ID` (o lo que identifique al equipo en otra plataforma). |
 | `fuente.tipo` | texto | sí | `agente` o `app`. |
 | `fuente.paquete` | texto | sí | El `applicationId` de quien reporta. |
+| `fuente.nombre` | texto | no | El nombre de la app como se ve en el teléfono («WMS Duralon»). El panel lo enseña en la columna «Aplicación»; sin él, busca el paquete en la lista de apps del equipo y, si no está, enseña el paquete. |
 | `fuente.version` | texto | no | `versionName`. |
 | `fuente.build` | entero | no | `versionCode`. |
 | `equipo.modelo` | texto | no | `Build.MODEL`. |
@@ -140,6 +141,7 @@ que llegó.
 | `almacenamiento` | objeto | `{libre, total}` en bytes. |
 | `apps` | lista | `[{paquete, version, build}]`. Mandarla solo cuando cambia: el hub guarda la última. |
 | `contexto` | objeto | Lo que la app quiera contar: empresa, quién tiene la sesión, almacén. Se guarda por fuente. Hasta 4 KB. |
+| `fuente` | objeto | `{nombre, version, build}` de quien reporta, por si la app se actualizó desde el alta. Lo que no viene se queda como estaba. |
 | `reportes` | lista | Reportes atrasados, cada uno con estos mismos campos y su `t`. |
 
 **Claves de convención en `contexto`.** El contexto es libre, pero el panel
@@ -217,7 +219,7 @@ zonas, reglas y códigos de alta, `ordenar` para mandarle órdenes a un equipo y
 | | |
 |---|---|
 | `GET /v1/resumen` | Cuántos equipos, conectados, perdidos, sin contacto en 24 h y alertas abiertas (de los dominios que alcanzas). |
-| `GET /v1/equipos` | El inventario. Filtros: `q` (nombre, etiqueta, serie, modelo, asignado a), `dominio`, `estado`, `conectado=1/0`, `alerta=1`, `sin_contacto=1` (más de 24 h sin contacto, la misma cuenta del resumen), `retirados=1`. Cada uno con su `dominio` (id) y `dominio_nombre`, su último reporte resumido y sus fuentes. |
+| `GET /v1/equipos` | El inventario. Filtros: `q` (nombre, etiqueta, serie, modelo, asignado a), `dominio`, `estado`, `conectado=1/0`, `alerta=1`, `sin_contacto=1` (más de 24 h sin contacto, la misma cuenta del resumen), `retirados=1`. Cada uno con su `dominio` (id) y `dominio_nombre`, su último reporte resumido y sus fuentes (`tipo`, `paquete`, `nombre`, `version`, `ultima_vez`, `contexto`; la que reportó más reciente, primero: es la «Aplicación» de la lista del panel). |
 | `GET /v1/equipos/:id` | Ficha: datos, fuentes con su contexto, último reporte, apps instaladas, alertas abiertas. |
 | `PATCH /v1/equipos/:id` | `nombre`, `etiqueta` (número de activo), `serie`, `dominio`, `asignado_a`, `notas`, `estado` (`activo`, `guardado`, `perdido`, `retirado`). Cambiarlo de dominio cierra las alertas de reglas del dominio que deja. |
 | `GET /v1/equipos/:id/recorrido` | Puntos de ubicación entre `desde` y `hasta` (fechas ISO; por defecto, las últimas 24 horas). |
@@ -325,7 +327,8 @@ final equipos = DeviceTrack(
 equipos.iniciar();
 ```
 
-El plugin hace el alta (fuente `app`, con el `applicationId`), los reportes
+El plugin hace el alta (fuente `app`, con el `applicationId` y el nombre de la
+app), los reportes
 (al abrir, cada `intervalo_s` con la app al frente y al volver al frente), la
 cola sin red, el WebSocket mientras la app está abierta y el acuse de las
 órdenes: `sonar` y `reportar` los atiende solo, `mensaje` va a `alOrden` y lo

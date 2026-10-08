@@ -30,7 +30,7 @@ class NativoFalso {
       case 'equipo':
         return {'huella': huella, 'modelo': 'TC51', 'fabricante': 'Zebra', 'android': 30};
       case 'fuente':
-        return {'tipo': 'app', 'paquete': 'com.ejemplo.app', 'version': '1.0.0', 'build': 1};
+        return {'tipo': 'app', 'paquete': 'com.ejemplo.app', 'nombre': 'Ejemplo', 'version': '1.0.0', 'build': 1};
       case 'estado':
         return {
           'bateria': 77,
@@ -138,7 +138,7 @@ void main() {
 
     expect(hub.altas.single, {
       'huella': 'a1b2c3d4e5f6',
-      'fuente': {'tipo': 'app', 'paquete': 'com.ejemplo.app', 'version': '1.0.0', 'build': 1},
+      'fuente': {'tipo': 'app', 'paquete': 'com.ejemplo.app', 'nombre': 'Ejemplo', 'version': '1.0.0', 'build': 1},
       'equipo': {'modelo': 'TC51', 'fabricante': 'Zebra', 'android': 30},
     });
     expect(nativo.almacen['credencial'], hub.credencial);
@@ -152,7 +152,7 @@ void main() {
     expect(r['red'], {'tipo': 'wifi', 'ssid': 'Almacén'});
     expect(r['contexto'], {'empresa': 7, 'sesion': true});
     expect(r['apps'], hasLength(1), reason: 'la primera vez va la lista de apps');
-    expect(r['fuente'], {'tipo': 'app', 'paquete': 'com.ejemplo.app', 'version': '1.0.0', 'build': 1});
+    expect(r['fuente'], {'tipo': 'app', 'paquete': 'com.ejemplo.app', 'nombre': 'Ejemplo', 'version': '1.0.0', 'build': 1});
     expect(r['equipo'], {'android': 30});
     expect(r.containsKey('ubicacion'), isFalse, reason: 'sin permiso no hay ubicación');
     expect(nativo.almacen['firma_apps'], 'firma-1');
