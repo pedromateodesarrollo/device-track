@@ -8,6 +8,7 @@ import android.location.Location
 import android.location.LocationListener
 import android.location.LocationManager
 import android.os.Build
+import android.os.Bundle
 import android.os.CancellationSignal
 import android.os.HandlerThread
 import androidx.core.content.ContextCompat
@@ -67,7 +68,7 @@ object Ubicacion {
                 ex.shutdown()
             } else {
                 for (p in proveedores) {
-                    val o = LocationListener { llega(it) }
+                    val o = Oyente(::llega)
                     oyentes.add(o)
                     try {
                         @Suppress("DEPRECATION")
@@ -83,6 +84,25 @@ object Ubicacion {
             hilo.quitSafely()
         }
         return mejor.get() ?: reciente(lm)
+    }
+
+    /**
+     * Con los cuatro métodos escritos, no con una lambda. Antes de Android 11
+     * `onStatusChanged`, `onProviderEnabled` y `onProviderDisabled` son
+     * abstractos (el `default` llegó en la API 30): una lambda solo trae
+     * `onLocationChanged` y, cuando el sistema avisa un cambio de estado del
+     * GPS, `AbstractMethodError` en el hilo de la lectura tumba la app entera.
+     * Pasó en las Zebra TC52/TC56/TC57 con Android 8.1 (2026-10-08).
+     */
+    private class Oyente(private val llega: (Location?) -> Unit) : LocationListener {
+        override fun onLocationChanged(location: Location) = llega(location)
+
+        @Deprecated("Solo lo llama Android 10 o anterior")
+        override fun onStatusChanged(provider: String?, status: Int, extras: Bundle?) {}
+
+        override fun onProviderEnabled(provider: String) {}
+
+        override fun onProviderDisabled(provider: String) {}
     }
 
     /** La última conocida, si no tiene más de 10 minutos. */

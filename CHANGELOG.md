@@ -2,6 +2,13 @@
 
 ## Sin publicar
 
+* **Arreglo: la lectura de la ubicación tumbaba la app en Android 10 o
+  anterior.** El oyente era una lambda y solo traía `onLocationChanged`; antes
+  de la API 30 `onStatusChanged`, `onProviderEnabled` y `onProviderDisabled`
+  son abstractos, y cuando el GPS cambiaba de estado (al conseguir satélites)
+  `AbstractMethodError` en el hilo `devicetrack-ubicacion` cerraba el proceso
+  entero. Afectaba al agente y a toda app con el plugin (visto en Zebra
+  TC52/TC56/TC57 con Android 8.1). Ahora el oyente implementa los cuatro.
 * **La aplicación que reporta.** La fuente manda el nombre de la app
   (`fuente.nombre`, la etiqueta del lanzador) en el alta y en cada reporte; el
   agente y el plugin lo hacen solos. La lista de equipos tiene la columna
