@@ -1,0 +1,9 @@
+<!-- Para Android 7 (sin iconos adaptables): fondo oscuro y el dibujo encima. -->
+<layer-list xmlns:android="http://schemas.android.com/apk/res/android">
+    <item>
+        <shape android:shape="oval">
+            <solid android:color="@color/fondo_icono" />
+        </shape>
+    </item>
+    <item android:drawable="@drawable/ic_launcher_foreground" />
+</layer-list>

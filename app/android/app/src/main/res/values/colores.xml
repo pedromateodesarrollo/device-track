@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- El fondo del icono: el oscuro del panel. El del agente es el azul;
+         así se distinguen los dos en el lanzador. -->
+    <color name="fondo_icono">#16181D</color>
+</resources>

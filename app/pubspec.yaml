@@ -1,0 +1,49 @@
+name: device_track_panel
+description: >-
+  El panel de device-track en el teléfono: tableros, equipos, alertas, el
+  asistente de IA y la administración básica, contra cualquier hub.
+publish_to: 'none'
+
+# versionName+versionCode del APK. publicar-version.sh los lee de aquí y los
+# equipos comparan el número de después del «+»: súbelo antes de publicar.
+version: 0.1.0+1
+
+environment:
+  sdk: ^3.13.4
+
+# Pocas y con razón. Lo que Android ya sabe hacer (abrir el mapa, compartir un
+# enlace, la versión instalada) va por un canal propio en MainActivity.kt, no
+# por otro paquete.
+dependencies:
+  flutter:
+    sdk: flutter
+  # Los textos de Material en español («Cortar», «Pegar», «Cancelar»).
+  flutter_localizations:
+    sdk: flutter
+
+  # El API del hub, y el chat del asistente en NDJSON (`send()` y el cuerpo
+  # leído por líneas mientras llega).
+  http: ^1.6.0
+
+  # Dónde está el hub y el token de la sesión.
+  shared_preferences: ^2.5.3
+
+  # El mapa: teselas de OpenStreetMap, como Leaflet en el panel web.
+  flutter_map: ^8.3.2
+  latlong2: ^0.10.1
+
+  # Auto-actualización desde apk-server (el hub y el slug van en
+  # android/app/build.gradle.kts).
+  apk_server_flutter:
+    git:
+      url: https://github.com/pedromateodesarrollo/apk-server
+      path: cliente/flutter
+      ref: v0.2.0
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^6.0.0
+
+flutter:
+  uses-material-design: true
