@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Compila el agente y lo publica en apk-server (https://apk.chalonasoft.com),
-# de donde se instala (/i/devicetrack) y se actualiza solo (Actualizador.kt).
+# de donde se instala (/i/devicetrack) y se actualiza solo (la biblioteca de
+# apk-server, configurada en AgenteApp.kt).
 #
 #   ./publicar-version.sh                 # versión y build salen de app/build.gradle.kts
 #   SKIP_BUILD=1 ./publicar-version.sh    # reusa el APK ya compilado
@@ -30,8 +31,10 @@ else
 fi
 [[ -f "$APK" ]] || { echo "Error: no existe $APK." >&2; exit 1; }
 
-"$RAIZ/scripts/publicar-apk-server.sh" --app devicetrack --apk "$APK" \
-  --version "$VERSION" --build "$BUILD" ${1:-}
+# Hub y app salen del APK (manifestPlaceholders de app/build.gradle.kts, que
+# toman devicetrack.apkServer y devicetrack.apkApp).
+(cd "$DIR" && "$RAIZ/scripts/publicar-apk-server.sh" --apk "$APK" \
+  --version "$VERSION" --build "$BUILD" ${1:-})
 
 echo ""
 echo "Listo: agente de device-track $VERSION (build $BUILD)."

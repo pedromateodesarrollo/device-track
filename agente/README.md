@@ -62,14 +62,16 @@ además, la regla del proyecto: nada de seguimiento a escondidas.
 
 ## Se actualiza solo
 
-Pregunta a apk-server como mucho cada hora, baja con Wi-Fi e instala. Para que
-pueda, el equipo tiene que tener permitido **«instalar apps desconocidas»** para
-el agente: a mano una vez, o en una flota por StageNow o el MDM.
+Con la biblioteca de [apk-server](https://github.com/pedromateodesarrollo/apk-server)
+(`cliente/android`, configurada en `AgenteApp.kt`): pregunta como mucho cada
+hora, baja con Wi-Fi e instala. Para que pueda, el equipo tiene que tener
+permitido **«instalar apps desconocidas»** para el agente: a mano una vez, o en
+una flota por StageNow o el MDM.
 
 **La primera actualización pide confirmar una vez** (probado en el emulador,
 2026-10-08): Android solo deja instalar sin preguntar a quien instaló la
 versión de ahora, y la primera la instaló el navegador o el instalador del
-sistema. El agente deja una notificación «Hay una versión nueva — toca para
+sistema. Queda la notificación «Actualización X lista — toca para
 instalarla». En un teléfono con servicios de Google, Play Protect además pide
 revisarla («Scan app» → «Install»); las Zebra sin servicios de Google no lo
 tienen. Desde esa primera, el agente es su propio instalador y las siguientes
@@ -85,6 +87,11 @@ Publicar una versión:
 
 ## Compilar tu propio agente
 
+La actualización es la biblioteca de apk-server, que entra al build por ruta:
+clona [apk-server](https://github.com/pedromateodesarrollo/apk-server) junto a
+este repositorio (`../apk-server`) o di dónde está con
+`-Papkserver.dir=<ruta a apk-server/cliente/android>`.
+
 Si montas tu propio hub, compílalo con tus direcciones (o ponlas en
 `android/gradle.properties`):
 
@@ -99,7 +106,7 @@ cd android
 | Propiedad | Por defecto | Para qué |
 |---|---|---|
 | `devicetrack.hub` | `https://devicetrack.chalonasoft.com` | El hub que se ofrece cuando el código de alta viene suelto (`dta_…`); el QR ya trae el suyo |
-| `devicetrack.apkServer` | `https://apk.chalonasoft.com` | De dónde se actualiza solo ([apk-server](https://github.com/pedromateodesarrollo/apk-server)). Vacío = no se actualiza |
+| `devicetrack.apkServer` | `https://apk.chalonasoft.com` | De dónde se actualiza solo ([apk-server](https://github.com/pedromateodesarrollo/apk-server)), y a dónde lo sube `publicar-version.sh`: va en el APK. Vacío = no se actualiza |
 | `devicetrack.apkApp` | `devicetrack` | Cómo se llama la app en ese apk-server |
 
 Y decide con qué llave firmarlo (`signingConfig` en `app/build.gradle.kts`):

@@ -5,7 +5,8 @@ plugins {
 
 // Lo que cambia quien compila su propio agente (con -P o en gradle.properties):
 //   devicetrack.hub        el hub que se ofrece en la pantalla de alta
-//   devicetrack.apkServer  de dónde se actualiza solo ("" = no se actualiza)
+//   devicetrack.apkServer  de dónde se actualiza solo ("" = no se actualiza);
+//                          también es a dónde lo sube publicar-version.sh
 //   devicetrack.apkApp     cómo se llama allí la app
 fun ajuste(nombre: String, porDefecto: String): String =
     (project.findProperty("devicetrack.$nombre") as String?) ?: porDefecto
@@ -27,8 +28,10 @@ android {
         versionCode = 3
         versionName = "0.1.2"
         buildConfigField("String", "HUB_POR_DEFECTO", "\"${ajuste("hub", "https://devicetrack.chalonasoft.com")}\"")
-        buildConfigField("String", "APK_SERVER", "\"${ajuste("apkServer", "https://apk.chalonasoft.com")}\"")
-        buildConfigField("String", "APK_APP", "\"${ajuste("apkApp", "devicetrack")}\"")
+        // apk-server (la biblioteca lo lee del manifiesto; el comando de
+        // publicar, del APK).
+        manifestPlaceholders["apkServerHub"] = ajuste("apkServer", "https://apk.chalonasoft.com")
+        manifestPlaceholders["apkServerApp"] = ajuste("apkApp", "devicetrack")
     }
 
     sourceSets {
@@ -62,6 +65,8 @@ kotlin {
 dependencies {
     implementation("androidx.core:core-ktx:1.16.0")
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
+    // Se actualiza solo (ver settings.gradle.kts y AgenteApp).
+    implementation(project(":apk-server"))
     // Escanear el QR del código de alta con la cámara (sin servicios de Google:
     // hay terminales que no los traen). En una Zebra el lector de códigos lo
     // escribe solo en el campo de texto.

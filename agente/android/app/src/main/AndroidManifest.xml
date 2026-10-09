@@ -29,9 +29,9 @@
     <uses-permission android:name="android.permission.QUERY_ALL_PACKAGES"
         tools:ignore="QueryAllPackagesPermission" />
     <uses-permission android:name="android.permission.CAMERA" />
-    <!-- Se actualiza solo con apk-server (Actualizador.kt). -->
-    <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
-    <uses-permission android:name="android.permission.UPDATE_PACKAGES_WITHOUT_USER_ACTION" />
+    <!-- Se actualiza solo con apk-server: los permisos, el receptor de la
+         instalación y la pantalla de la notificación los trae su biblioteca
+         (ver AgenteApp). -->
 
     <uses-feature android:name="android.hardware.camera" android:required="false" />
 
@@ -86,7 +86,6 @@
 
         <receiver android:name=".TomaReceiver" android:exported="false" />
         <receiver android:name=".SonarReceiver" android:exported="false" />
-        <receiver android:name=".InstalacionReceiver" android:exported="false" />
         <receiver android:name=".ArranqueReceiver" android:exported="true">
             <intent-filter>
                 <action android:name="android.intent.action.BOOT_COMPLETED" />

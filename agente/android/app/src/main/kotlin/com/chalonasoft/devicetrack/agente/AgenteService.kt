@@ -12,6 +12,7 @@ import android.os.PowerManager
 import android.util.Log
 import androidx.core.app.ServiceCompat
 import androidx.core.content.ContextCompat
+import com.chalonasoft.apkserver.ApkServer
 import com.chalonasoft.devicetrack.comun.Almacen
 import com.chalonasoft.devicetrack.comun.Canal
 import com.chalonasoft.devicetrack.comun.Hub
@@ -110,7 +111,7 @@ class AgenteService : Service() {
             // La próxima primero: si este reporte falla, la cadena sigue.
             Programador.programar(this)
             reportar(motivo ?: "periodico")
-            Actualizador.quizas(this)
+            ApkServer.de(this).quizas()
         } else {
             // Abrir la app no suma reportes de más: solo si ya tocaba.
             val falta = Programador.restante(this)
