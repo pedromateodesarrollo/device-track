@@ -150,15 +150,17 @@ class _UsuariosPageState extends State<UsuariosPage> {
                   children: [
                     Text('${u['nombre'] ?? ''}', style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 16)),
                     Text('${u['correo'] ?? ''}', style: apagado(context, tamano: 13)),
+                    // Debajo y no al lado: a la derecha le quitaba ancho al
+                    // correo, que se partía a media palabra («…@gmai / l.com»).
+                    if (esYo)
+                      Padding(
+                        padding: const EdgeInsets.only(top: 6),
+                        child: Pastilla('${Yo.rolesTexto[rol] ?? rol} (tú)'),
+                      ),
                   ],
                 ),
               ),
-              if (esYo)
-                Padding(
-                  padding: const EdgeInsets.only(right: 8),
-                  child: Pastilla('${Yo.rolesTexto[rol] ?? rol} (tú)'),
-                )
-              else
+              if (!esYo)
                 PopupMenuButton<String>(
                   tooltip: 'Cambiar el rol',
                   initialValue: rol,

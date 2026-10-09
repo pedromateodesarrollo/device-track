@@ -160,6 +160,10 @@ ThemeData tema(Brightness brillo) {
     ),
     chipTheme: ChipThemeData(side: BorderSide(color: p.borde)),
     dividerTheme: DividerThemeData(color: p.borde, space: 1),
+    // La parte vacía de la barra sale de `secondaryContainer` (marcaSuave), que
+    // sobre el fondo de un diálogo no se ve: el tiempo de Sonar parecía un
+    // punto suelto.
+    sliderTheme: SliderThemeData(inactiveTrackColor: p.marca.withValues(alpha: .25)),
     filledButtonTheme: FilledButtonThemeData(
       style: FilledButton.styleFrom(shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10))),
     ),
