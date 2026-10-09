@@ -2,6 +2,30 @@
 
 ## Sin publicar
 
+* **El panel en Android** (`app/`): una app Flutter con los tableros de
+  Inicio, los equipos con su ficha (Sonar, Mensaje, Reportar ya, Editar), las
+  alertas, el asistente y, en Más, el mapa, las reglas, las personas y la
+  cuenta. Habla con el mismo API que el panel web, con la sesión de la persona.
+  Se instala desde https://apk.chalonasoft.com/i/devicetrack-panel y se
+  actualiza sola con apk-server; en el panel web, **Mi cuenta** trae el enlace
+  y su QR.
+* **Asistente de IA.** Cada organización pone las credenciales de su propia
+  cuenta con Anthropic o Gemini (Organización → Asistente IA, migración 0005):
+  el hub no trae una clave propia ni le presta a una organización la de otra.
+  El asistente usa las mismas rutas del panel, con la sesión de quien pregunta,
+  así que ve y hace lo mismo que esa persona. Lo que cambia algo queda
+  **propuesto** y la persona lo confirma o lo descarta (migración 0007).
+* **Tableros en Inicio.** El Resumen de siempre es el tablero 0; con el
+  asistente se personaliza y se arman otros, propios o compartidos, que se
+  calculan con la sesión de quien mira.
+* **Avisos por correo.** Cada regla puede avisar a unos correos (hasta 20) por
+  el correo de salida de la organización: al abrirse la alerta y uno por hora
+  por regla y equipo (migración 0006).
+* **El agente se actualiza con la biblioteca de apk-server** (0.2.0), que
+  entra al build como un proyecto más: para compilarlo, clona
+  [apk-server](https://github.com/pedromateodesarrollo/apk-server) junto a
+  device-track o di dónde está con `-Papkserver.dir`. El hub y la app de
+  apk-server van en el APK (`manifestPlaceholders`).
 * **Arreglo: la lectura de la ubicación tumbaba la app en Android 10 o
   anterior.** El oyente era una lambda y solo traía `onLocationChanged`; antes
   de la API 30 `onStatusChanged`, `onProviderEnabled` y `onProviderDisabled`

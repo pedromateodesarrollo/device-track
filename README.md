@@ -191,7 +191,7 @@ WebSocket). Con systemd: `hub/deploy-hub.sh`.
 | `android-comun/` | El Kotlin que comparten el agente y el plugin |
 | `cliente/flutter/` | El plugin de Flutter (`device_track_flutter`), con una app de ejemplo |
 | `cliente/dart/` | El protocolo del equipo en Dart puro (`device_track`), para servidores y otras plataformas |
-| `android-comun/` | El Kotlin que comparten el agente y el plugin |
+| `app/` | El panel en Android: app Flutter con los equipos, las alertas, los tableros y el asistente. Se instala desde https://apk.chalonasoft.com/i/devicetrack-panel y se actualiza sola. Ver [app/README.md](app/README.md) |
 
 ### Meterlo en tu app Flutter
 

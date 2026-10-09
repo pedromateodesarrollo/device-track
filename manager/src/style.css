@@ -461,6 +461,12 @@ table.compacta th, table.compacta td { padding: 6px 8px; }
 .codigo-creado { display: flex; gap: 18px; align-items: flex-start; flex-wrap: wrap; }
 .qr-alta { width: 180px; height: 180px; flex: none; background: #fff; padding: 10px; border-radius: 12px; }
 .qr-alta svg { width: 100%; height: 100%; display: block; }
+.qr-alta.qr-app { width: 132px; height: 132px; }
+.enlace-app { overflow-wrap: anywhere; }
+/* En el teléfono no hay a qué apuntarle el QR: basta el enlace. */
+@media (max-width: 780px) {
+  .qr-alta.qr-app, .solo-ancho { display: none; }
+}
 
 .chico-select { width: auto; padding: 5px 8px; font-size: 14px; }
 
