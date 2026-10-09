@@ -21,6 +21,8 @@
 * **Avisos por correo.** Cada regla puede avisar a unos correos (hasta 20) por
   el correo de salida de la organización: al abrirse la alerta y uno por hora
   por regla y equipo (migración 0006).
+* **Agente 0.1.3**, con el arreglo de la ubicación de abajo y la
+  actualización nueva. Se instala desde https://apk.chalonasoft.com/i/devicetrack.
 * **El agente se actualiza con la biblioteca de apk-server** (0.2.0), que
   entra al build como un proyecto más: para compilarlo, clona
   [apk-server](https://github.com/pedromateodesarrollo/apk-server) junto a
