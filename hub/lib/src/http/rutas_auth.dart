@@ -38,14 +38,16 @@ void registraRutasAuth(Servidor s) {
 
   // `recuperar`: si alguna organización tiene correo de salida, la entrada
   // enseña «¿Olvidaste tu clave?». Sin un correo por donde mandar el enlace no
-  // hay recuperación posible, y no se ofrece.
+  // hay recuperación posible, y no se ofrece. Tampoco sin DT_URL_PUBLICA: el
+  // enlace no puede armarse con el Host de la petición, que lo escribe quien
+  // la manda (pediría la clave de otro y el token llegaría a su página).
   s.ruta('GET', '/salud', (p) async {
     await p.bd.fila('select 1 as ok');
     return Respuesta.ok({
       'ok': true,
       'servicio': 'device-track',
       'registro': p.config.registro,
-      'recuperar': await _hayCorreoDeSalida(p.bd),
+      'recuperar': p.config.urlPublica.isNotEmpty && await _hayCorreoDeSalida(p.bd),
     });
   }, acceso: Acceso.publico);
 
@@ -136,15 +138,16 @@ void registraRutasAuth(Servidor s) {
       {'c': correo},
     );
     final c = ConfigCorreo.deJson(u?['correo_org']);
-    if (u != null && c != null && c.completa) {
-      final token = await nuevaInvitacion(p.bd, u['id'] as int, vida: vidaRecuperacion);
+    if (u != null && c != null && c.completa && p.config.urlPublica.isNotEmpty) {
       log.info('auth', 'recuperación pedida: usuario ${u['id']}');
       unawaited(_mandaRecuperacion(
+        p.bd,
         c,
+        usuario: u['id'] as int,
         para: '${u['correo']}',
         nombre: '${u['nombre']}',
         org: '${u['organizacion']}',
-        enlace: enlaceInvitacion(p.urlPublica, token),
+        urlPublica: p.config.urlPublica,
       ));
     }
     return Respuesta.ok({'pedido': true});
@@ -432,17 +435,21 @@ Future<Map<String, Object?>?> _mandaInvitacion(Peticion p, String para, String n
   }
 }
 
-/// El correo de «¿Olvidaste tu clave?». Corre después de contestar: si no
-/// sale, queda en el log y la persona puede pedir otro.
+/// El enlace y el correo de «¿Olvidaste tu clave?». Corre después de
+/// contestar, para que la respuesta tarde lo mismo tenga o no cuenta el
+/// correo; si no sale, queda en el log y la persona puede pedir otro.
 Future<void> _mandaRecuperacion(
+  Bd bd,
   ConfigCorreo c, {
+  required int usuario,
   required String para,
   required String nombre,
   required String org,
-  required String enlace,
+  required String urlPublica,
 }) async {
   final minutos = vidaRecuperacion.inMinutes;
   try {
+    final enlace = enlaceInvitacion(urlPublica, await nuevaInvitacion(bd, usuario, vida: vidaRecuperacion));
     await enviaCorreo(
       c,
       para: para,
