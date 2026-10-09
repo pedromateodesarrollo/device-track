@@ -2,6 +2,12 @@
 
 ## Sin publicar
 
+* **¿Olvidaste tu clave?** En la entrada del panel web y de la app, solo si
+  el hub tiene alguna organización con correo de salida (`recuperar` de
+  `GET /salud`). `POST /v1/auth/recuperar` manda por el correo de salida de la
+  organización un enlace de un solo uso que vence en 1 hora; contesta lo mismo
+  tenga o no cuenta el correo, y con frenos por IP y por correo. Panel en
+  Android 0.1.1.
 * **El panel en Android** (`app/`): una app Flutter con los tableros de
   Inicio, los equipos con su ficha (Sonar, Mensaje, Reportar ya, Editar), las
   alertas, el asistente y, en Más, el mapa, las reglas, las personas y la

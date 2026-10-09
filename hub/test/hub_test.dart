@@ -729,6 +729,84 @@ void main() {
     }
   });
 
+  test('recuperar la clave: solo con correo de salida, sin delatar cuentas, y el enlace la cambia', () async {
+    final smtp = await SmtpFalso.arranca();
+    // El correo sale después de contestar: se espera a que llegue.
+    Future<String> esperaCorreo(int antes) async {
+      for (var i = 0; i < 60 && smtp.mensajes.length == antes; i++) {
+        await Future<void>.delayed(const Duration(milliseconds: 50));
+      }
+      expect(smtp.mensajes.length, antes + 1, reason: 'no llegó el correo');
+      return SmtpFalso.parte(smtp.mensajes.last, 'text/plain');
+    }
+
+    try {
+      await pide('PUT', '/v1/org/correo', json: {'quitar': true}, token: admin);
+      var (st, d) = await pide('GET', '/salud');
+      expect(d['recuperar'], isFalse);
+      // Sin correo de salida no sale nada, y la respuesta es la de siempre.
+      (st, d) = await pide('POST', '/v1/auth/recuperar', json: {'correo': 'mira@prueba.do'});
+      expect(st, 200);
+      expect(d, {'pedido': true});
+      await Future<void>.delayed(const Duration(milliseconds: 300));
+      expect(smtp.mensajes, isEmpty);
+
+      (st, d) = await pide('PUT', '/v1/org/correo',
+          json: {'host': '127.0.0.1', 'puerto': smtp.puerto, 'seguridad': 'ninguna', 'remitente': 'avisos@prueba.do'},
+          token: admin);
+      expect(st, 200, reason: '$d');
+      (st, d) = await pide('GET', '/salud');
+      expect(d['recuperar'], isTrue);
+
+      // Un correo sin cuenta: misma respuesta, ningún correo.
+      (st, d) = await pide('POST', '/v1/auth/recuperar', json: {'correo': 'nadie@prueba.do'});
+      expect(st, 200);
+      expect(d, {'pedido': true});
+      await Future<void>.delayed(const Duration(milliseconds: 300));
+      expect(smtp.mensajes, isEmpty);
+
+      (st, d) = await pide('POST', '/v1/auth/recuperar', json: {'correo': 'MIRA@prueba.do'});
+      expect(st, 200);
+      expect(d, {'pedido': true});
+      final texto = await esperaCorreo(0);
+      expect(smtp.ordenes, contains('RCPT TO:<mira@prueba.do>'));
+      expect(texto, contains('vence en 60 minutos'));
+      final token = RegExp(r'/#/activar/(\S+)').firstMatch(texto)!.group(1)!;
+
+      // Hasta que se use el enlace, la clave de antes sigue valiendo.
+      (st, _) = await pide('POST', '/v1/auth/login', json: {'correo': 'mira@prueba.do', 'clave': 'clave-de-prueba'});
+      expect(st, 200);
+      final vence = await hub.bd.fila(
+        "select invitacion_vence < now() + interval '61 minutes' as hora from dt.usuario where correo = 'mira@prueba.do'",
+      );
+      expect(vence!['hora'], isTrue, reason: 'el enlace de recuperación vence en una hora');
+      (st, d) = await pide('POST', '/v1/auth/activar', json: {'token': token, 'clave': 'clave-nueva-de-mira'});
+      expect(st, 200, reason: '$d');
+      expect(d['usuario']['correo'], 'mira@prueba.do');
+      (st, _) = await pide('POST', '/v1/auth/login', json: {'correo': 'mira@prueba.do', 'clave': 'clave-de-prueba'});
+      expect(st, 401);
+      (st, _) = await pide('POST', '/v1/auth/login', json: {'correo': 'mira@prueba.do', 'clave': 'clave-nueva-de-mira'});
+      expect(st, 200);
+      (st, d) = await pide('POST', '/v1/auth/activar', json: {'token': token, 'clave': 'otra-clave-mas'});
+      expect(st, 410);
+      expect(d['mensaje'], contains('¿Olvidaste tu clave?'));
+
+      // Frenos: tres por correo cada hora y cinco por IP cada minuto. Este es
+      // el cuarto pedido de IP y el tercero de mira.
+      (st, _) = await pide('POST', '/v1/auth/recuperar', json: {'correo': 'mira@prueba.do'});
+      expect(st, 200);
+      await esperaCorreo(1);
+      (st, d) = await pide('POST', '/v1/auth/recuperar', json: {'correo': 'mira@prueba.do'});
+      expect(st, 429, reason: 'cuarto del mismo correo en la hora');
+      (st, d) = await pide('POST', '/v1/auth/recuperar', json: {'correo': 'admin@prueba.do'});
+      expect(st, 429, reason: 'sexto de la misma IP en el minuto');
+      expect(smtp.mensajes, hasLength(2));
+    } finally {
+      await pide('PUT', '/v1/org/correo', json: {'quitar': true}, token: admin);
+      await smtp.cierra();
+    }
+  });
+
   test('avisos por correo: la regla escribe a su lista, una vez por hora', () async {
     final smtp = await SmtpFalso.arranca();
     try {

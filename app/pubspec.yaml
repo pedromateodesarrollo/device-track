@@ -6,7 +6,7 @@ publish_to: 'none'
 
 # versionName+versionCode del APK. publicar-version.sh los lee de aquí y los
 # equipos comparan el número de después del «+»: súbelo antes de publicar.
-version: 0.1.0+1
+version: 0.1.1+2
 
 environment:
   sdk: ^3.13.4

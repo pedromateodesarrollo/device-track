@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import '../correo.dart';
 import '../db.dart';
 import '../dominios.dart';
@@ -11,6 +13,11 @@ import 'servidor.dart';
 /// Cuánto vale un enlace de invitación.
 const vidaInvitacion = Duration(days: 7);
 
+/// Cuánto vale el enlace de «¿Olvidaste tu clave?»: lo pide la persona y lo
+/// usa en el momento, así que una hora basta y deja poca ventana a quien lea
+/// su correo después.
+const vidaRecuperacion = Duration(hours: 1);
+
 /// `admin` todo; `editor` equipos, órdenes, zonas, reglas y códigos de alta;
 /// `consulta` solo mira.
 const rolesValidos = {'admin', 'editor', 'consulta'};
@@ -23,10 +30,23 @@ const rolesValidos = {'admin', 'editor', 'consulta'};
 /// la escribe la persona, y el administrador nunca la ve.
 void registraRutasAuth(Servidor s) {
   final freno = Limitador(cupo: 10, ventana: const Duration(minutes: 1));
+  // «¿Olvidaste tu clave?» manda un correo a quien diga el formulario: por IP
+  // frena a quien prueba correos, y por correo, a quien quiere llenarle el
+  // buzón a alguien.
+  final frenoRecuperarIp = Limitador(cupo: 5, ventana: const Duration(minutes: 1));
+  final frenoRecuperarCorreo = Limitador(cupo: 3, ventana: const Duration(hours: 1));
 
+  // `recuperar`: si alguna organización tiene correo de salida, la entrada
+  // enseña «¿Olvidaste tu clave?». Sin un correo por donde mandar el enlace no
+  // hay recuperación posible, y no se ofrece.
   s.ruta('GET', '/salud', (p) async {
     await p.bd.fila('select 1 as ok');
-    return Respuesta.ok({'ok': true, 'servicio': 'device-track', 'registro': p.config.registro});
+    return Respuesta.ok({
+      'ok': true,
+      'servicio': 'device-track',
+      'registro': p.config.registro,
+      'recuperar': await _hayCorreoDeSalida(p.bd),
+    });
   }, acceso: Acceso.publico);
 
   // Alta de organización. Solo con APK_REGISTRO=abierto.
@@ -96,6 +116,40 @@ void registraRutasAuth(Servidor s) {
     return Respuesta.ok(_conToken(u, p.config.secretoJwt));
   }, acceso: Acceso.publico);
 
+  // «¿Olvidaste tu clave?»: si el correo tiene cuenta y su organización tiene
+  // correo de salida, le llega un enlace para poner una clave nueva (el mismo
+  // de la invitación, que vence en una hora). La respuesta es siempre la misma
+  // y el correo sale después de contestar: ni el contenido ni lo que tarda
+  // dicen si el correo tiene cuenta. La clave de antes sigue valiendo hasta
+  // que se use el enlace.
+  s.ruta('POST', '/v1/auth/recuperar', (p) async {
+    final correo = p.texto('correo').toLowerCase();
+    if (!frenoRecuperarIp.cabe('recuperar:${p.ip}') || !frenoRecuperarCorreo.cabe('recuperar:$correo')) {
+      return Respuesta.falla(429, 'demasiados_intentos', 'Ya pediste varios enlaces: espera un rato y revisa tu correo');
+    }
+    final problema = _revisaCorreo(correo);
+    if (problema != null) return problema;
+    final u = await p.bd.fila(
+      '''select u.id, u.correo, u.nombre, o.nombre as organizacion, o.correo as correo_org
+           from dt.usuario u join dt.org o on o.id = u.org
+          where u.correo = @c''',
+      {'c': correo},
+    );
+    final c = ConfigCorreo.deJson(u?['correo_org']);
+    if (u != null && c != null && c.completa) {
+      final token = await nuevaInvitacion(p.bd, u['id'] as int, vida: vidaRecuperacion);
+      log.info('auth', 'recuperación pedida: usuario ${u['id']}');
+      unawaited(_mandaRecuperacion(
+        c,
+        para: '${u['correo']}',
+        nombre: '${u['nombre']}',
+        org: '${u['organizacion']}',
+        enlace: enlaceInvitacion(p.urlPublica, token),
+      ));
+    }
+    return Respuesta.ok({'pedido': true});
+  }, acceso: Acceso.publico);
+
   // Lo que la pantalla de activación puede enseñar antes de que la persona
   // ponga su clave: el correo y si el enlace sirve. Nada de la organización:
   // quien tiene el enlace todavía no ha demostrado nada.
@@ -127,7 +181,7 @@ void registraRutasAuth(Servidor s) {
       return Respuesta.falla(
         410,
         'invitacion_vencida',
-        'El enlace venció o ya se usó. Pide otro a quien te invitó.',
+        'El enlace venció o ya se usó. Pide otro: en la entrada, «¿Olvidaste tu clave?», o a quien administra.',
       );
     }
     final hecho = await p.bd.fila(
@@ -323,15 +377,16 @@ Respuesta _adminSinDominios() => Respuesta.falla(400, 'admin_sin_dominios',
     'Un administrador alcanza toda la organización: para limitarlo a unos dominios, hazlo editor o consulta');
 
 /// Genera el enlace de un solo uso de [usuario] y lo deja guardado (hasheado).
-/// Invalida cualquier enlace anterior de esa persona.
-Future<String> nuevaInvitacion(Bd bd, int usuario) async {
+/// Invalida cualquier enlace anterior de esa persona. El de «¿Olvidaste tu
+/// clave?» es el mismo, con [vida] de una hora.
+Future<String> nuevaInvitacion(Bd bd, int usuario, {Duration vida = vidaInvitacion}) async {
   final token = Seguridad.token();
   await bd.ejecuta(
     '''update dt.usuario set invitacion_hash = @h, invitacion_vence = @v
         where id = @i''',
     {
       'h': Seguridad.hashToken(token),
-      'v': DateTime.now().toUtc().add(vidaInvitacion),
+      'v': DateTime.now().toUtc().add(vida),
       'i': usuario,
     },
   );
@@ -375,6 +430,51 @@ Future<Map<String, Object?>?> _mandaInvitacion(Peticion p, String para, String n
     log.aviso('correo', 'invitación a $para no salió: ${e.codigo} ${e.detalle}');
     return {'enviado': false, 'error': e.codigo, 'detalle': e.detalle};
   }
+}
+
+/// El correo de «¿Olvidaste tu clave?». Corre después de contestar: si no
+/// sale, queda en el log y la persona puede pedir otro.
+Future<void> _mandaRecuperacion(
+  ConfigCorreo c, {
+  required String para,
+  required String nombre,
+  required String org,
+  required String enlace,
+}) async {
+  final minutos = vidaRecuperacion.inMinutes;
+  try {
+    await enviaCorreo(
+      c,
+      para: para,
+      asunto: 'Clave nueva para el panel de device-track',
+      texto: 'Hola, $nombre:\n\n'
+          'Pediste poner una clave nueva para el panel de device-track de $org.\n\n'
+          'Ponla aquí (el enlace sirve una vez y vence en $minutos minutos):\n'
+          '$enlace\n\n'
+          'Si no lo pediste tú, ignora este correo: tu clave sigue igual.',
+      html: '<div style="font-family:-apple-system,Segoe UI,Roboto,Arial,sans-serif;'
+          'max-width:560px;margin:0 auto;padding:16px;color:#1f2328">'
+          '<p>Hola, ${_html(nombre)}:</p>'
+          '<p>Pediste poner una clave nueva para el panel de <strong>device-track</strong> '
+          'de ${_html(org)}.</p>'
+          '<p style="margin:24px 0"><a href="${_html(enlace)}" style="background:#3b82f6;'
+          'color:#fff;padding:12px 20px;border-radius:8px;text-decoration:none">'
+          'Poner mi clave nueva</a></p>'
+          '<p style="font-size:13px;color:#57606a">El enlace sirve una vez y vence en $minutos minutos. '
+          'Si no lo pediste tú, ignora este correo: tu clave sigue igual.</p></div>',
+    );
+  } on CorreoError catch (e) {
+    log.aviso('correo', 'recuperación a $para no salió: ${e.codigo} ${e.detalle}');
+  } catch (e) {
+    log.aviso('correo', 'recuperación a $para no salió: $e');
+  }
+}
+
+/// Si alguna organización tiene correo de salida: sin él no hay por dónde
+/// mandar el enlace de «¿Olvidaste tu clave?».
+Future<bool> _hayCorreoDeSalida(Bd bd) async {
+  final filas = await bd.filas("select correo from dt.org where correo <> '{}'::jsonb");
+  return filas.any((f) => ConfigCorreo.deJson(f['correo'])?.completa ?? false);
 }
 
 String _html(String s) => s

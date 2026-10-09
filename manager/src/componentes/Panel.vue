@@ -23,6 +23,11 @@ const correo = ref('')
 const clave = ref('')
 const error = ref('')
 const enviando = ref(false)
+// «¿Olvidaste tu clave?»: solo si el hub tiene por dónde mandar el enlace
+// (`recuperar` de /salud, alguna organización con correo de salida).
+const recuperable = ref(false)
+const recuperando = ref(false)
+const pedido = ref(false)
 const menuAbierto = ref(false)
 const alertasAbiertas = ref(0)
 
@@ -76,6 +81,11 @@ onMounted(async () => {
   }
   cargando.value = false
   if (yo.value) cuentaAlertas()
+  else {
+    try {
+      recuperable.value = (await api.get('/salud')).recuperar === true
+    } catch { /* sin /salud, sin recuperación: la entrada funciona igual */ }
+  }
 })
 
 // Al cambiar de pantalla: se cierra el menú del teléfono y se refresca el
@@ -100,6 +110,25 @@ async function entra() {
   }
 }
 
+async function recupera() {
+  error.value = ''
+  enviando.value = true
+  try {
+    await api.post('/v1/auth/recuperar', { correo: correo.value })
+    pedido.value = true
+  } catch (e) {
+    error.value = e.message
+  } finally {
+    enviando.value = false
+  }
+}
+
+function vuelveAEntrar() {
+  recuperando.value = false
+  pedido.value = false
+  error.value = ''
+}
+
 function ve(id) {
   location.hash = id === 'inicio' ? '#/panel' : `#/panel/${id}`
   menuAbierto.value = false
@@ -118,12 +147,35 @@ function sale() {
   </div>
 
   <div v-else-if="!yo" class="contenedor" style="padding: 56px 22px; max-width: 460px">
-    <h1 style="font-size: 28px">Entrar</h1>
-    <p class="apagado">
+    <h1 style="font-size: 28px">{{ recuperando ? '¿Olvidaste tu clave?' : 'Entrar' }}</h1>
+    <p v-if="!recuperando" class="apagado">
       Con la cuenta de tu organización. Si todavía no tienes, pídele una
       invitación a quien administra este hub.
     </p>
-    <form class="caja" @submit.prevent="entra">
+    <div v-if="recuperando && pedido" class="caja">
+      <p style="margin: 0">
+        Si <strong>{{ correo }}</strong> tiene cuenta, te llegó un enlace para poner una clave
+        nueva. Vence en 1 hora.
+      </p>
+      <p class="apagado chico" style="margin: 10px 0 0">
+        Si no llega, mira en el correo no deseado o pídele uno a quien administra.
+      </p>
+      <button class="boton suave" style="margin-top: 18px" @click="vuelveAEntrar">Volver a entrar</button>
+    </div>
+    <form v-else-if="recuperando" class="caja" @submit.prevent="recupera">
+      <p class="apagado" style="margin: 0 0 6px">
+        Te mandamos un enlace a tu correo para poner una clave nueva. Tu clave de ahora sigue
+        valiendo hasta que la cambies.
+      </p>
+      <label>Correo</label>
+      <input v-model="correo" type="email" autocomplete="username" required />
+      <p v-if="error" class="aviso" style="margin-top: 12px">{{ error }}</p>
+      <div class="en-linea" style="margin-top: 18px; flex-wrap: wrap">
+        <button class="boton" :disabled="enviando">{{ enviando ? 'Un momento…' : 'Mandar el enlace' }}</button>
+        <button type="button" class="boton suave" @click="vuelveAEntrar">Volver</button>
+      </div>
+    </form>
+    <form v-else class="caja" @submit.prevent="entra">
       <label>Correo</label>
       <input v-model="correo" type="email" autocomplete="username" required />
       <label>Clave</label>
@@ -132,6 +184,9 @@ function sale() {
       <button class="boton" style="margin-top: 18px" :disabled="enviando">
         {{ enviando ? 'Un momento…' : 'Entrar' }}
       </button>
+      <p v-if="recuperable" style="margin: 14px 0 0">
+        <a href="#" @click.prevent="recuperando = true; error = ''">¿Olvidaste tu clave?</a>
+      </p>
     </form>
   </div>
 

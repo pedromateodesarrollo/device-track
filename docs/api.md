@@ -288,6 +288,18 @@ error, detalle}`; `PATCH /v1/usuarios/:id` cambia `rol`, `nombre` o
 dice los dominios de quien pregunta: `dominios: [{id, nombre, slug}]`, vacío si
 alcanza toda la organización.
 
+**¿Olvidaste tu clave?** `GET /salud` (público) trae `recuperar: true` si
+alguna organización tiene correo de salida: solo entonces la entrada ofrece la
+recuperación, porque sin correo no hay por dónde mandar el enlace.
+`POST /v1/auth/recuperar {correo}` (público) contesta siempre `200
+{"pedido": true}`, tenga o no cuenta ese correo: si la tiene y su organización
+tiene correo de salida, le manda por él un enlace de un solo uso
+(`/#/activar/<token>`, el mismo de la invitación, que se usa con
+`POST /v1/auth/activar`) que vence en 1 hora. El correo sale después de
+contestar, para que tampoco lo delate el tiempo de respuesta; la clave de antes
+sigue valiendo hasta que se use el enlace. Frenos: 5 pedidos por minuto por IP
+y 3 por hora por correo (`429 demasiados_intentos`).
+
 | | |
 |---|---|
 | `GET /v1/org` | La configuración: `intervalo_s`, `ubicacion`, `dias_historial`, si el webhook va firmado y —solo para `admin`, porque suele llevar su propio token— `webhook_url` y `correo` (el correo de salida, sin la clave: `clave_puesta` y `configurado`). |
