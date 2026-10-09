@@ -245,7 +245,7 @@ equipo deja de contar para las alertas. Borrar es para lo que entró por error.
 | | |
 |---|---|
 | `GET/POST/PATCH/DELETE /v1/zonas` | Una zona es un círculo: `{nombre, lat, lng, radio_m, dominio?}`. El almacén, la sucursal. Sin `dominio` es de toda la organización. |
-| `GET/POST/PATCH/DELETE /v1/reglas` | Qué vigilar, para todos o para un dominio: `{tipo, nombre?, dominio?, parametros, activa?}`. Sin `dominio` vigila a todos los equipos de la organización. El `PATCH` cambia solo lo que trae (`{activa: false}` la apaga y deja lo demás); el tipo no se cambia. Si cambian el dominio, los parámetros o si está activa, sus alertas abiertas se cierran. Una regla `fuera_de_zona` usa una zona de toda la organización o de su mismo dominio. |
+| `GET/POST/PATCH/DELETE /v1/reglas` | Qué vigilar, para todos o para un dominio: `{tipo, nombre?, dominio?, parametros, activa?, avisar?}`. `avisar` es la lista de correos a los que se escribe cuando la regla abre una alerta (hasta 20). Sin `dominio` vigila a todos los equipos de la organización. El `PATCH` cambia solo lo que trae (`{activa: false}` la apaga y deja lo demás); el tipo no se cambia. Si cambian el dominio, los parámetros o si está activa, sus alertas abiertas se cierran. Una regla `fuera_de_zona` usa una zona de toda la organización o de su mismo dominio. |
 | `GET /v1/alertas` | Las alertas abiertas (y las cerradas, con `todas=1`), con el `dominio` y `dominio_nombre` del equipo. |
 | `POST /v1/alertas/:id/cerrar` | La cierra a mano, con una nota. |
 
@@ -263,8 +263,14 @@ Cada regla avisa en el panel y, si la organización lo configura, por
 sistema de cada quien haga lo que quiera (un correo, un mensaje, un ticket).
 Va firmado: `X-Device-Track-Firma: sha256=<HMAC-SHA256 del cuerpo con el
 secreto>`, y `X-Device-Track-Evento` dice `alerta_abierta`, `alerta_cerrada` o
-`prueba`. Sin reintentos: lo que no llega se ve en el panel igual. El correo
-directo desde el hub queda para más adelante.
+`prueba`. Sin reintentos: lo que no llega se ve en el panel igual.
+
+Y por **correo**, a la lista `avisar` de la regla, por el correo de salida de la
+organización (`PUT /v1/org/correo`): qué pasó, el equipo, su dominio, a quién
+está asignado, su batería, un enlace a su última ubicación y otro a su ficha en
+el panel. Solo cuando la alerta se abre. Por la misma regla y el mismo equipo,
+como mucho un correo por hora: una batería que sube y baja junto al umbral no
+llena el buzón. Sin correo de salida, la lista espera.
 
 Cerrar una alerta a mano no apaga la regla: si la condición sigue, la próxima
 evaluación la vuelve a abrir.
@@ -288,7 +294,10 @@ alcanza toda la organización.
 | `PATCH /v1/org` | Cambiarla. Los equipos conectados reciben la configuración nueva al instante; los demás, en su próximo reporte. |
 | `POST /v1/org/webhook/secreto` | Genera el secreto con que se firma el webhook. Se enseña una vez. |
 | `POST /v1/org/webhook/prueba` | Manda un POST de prueba y dice qué contestó. |
-| `PUT /v1/org/correo` | El correo de salida, con el que salen las invitaciones: `host`, `puerto`, `seguridad` (`tls` = TLS directo, 465; `starttls`, 587; `ninguna`, solo en una red propia), `remitente`, `usuario`, `clave`, `nombre` (el que se ve en el «De:»). La `clave` no vuelve nunca; si no viene, o viene vacía, se queda la que estaba. `{"quitar": true}` lo borra. Solo `admin`. |
+| `PUT /v1/org/correo` | El correo de salida, con el que salen las invitaciones y los avisos de las reglas: `host`, `puerto`, `seguridad` (`tls` = TLS directo, 465; `starttls`, 587; `ninguna`, solo en una red propia), `remitente`, `usuario`, `clave`, `nombre` (el que se ve en el «De:»). La `clave` no vuelve nunca; si no viene, o viene vacía, se queda la que estaba. `{"quitar": true}` lo borra. Solo `admin`. |
+| `GET /v1/org/ia` | El asistente de IA de la organización: `proveedor`, `modelo`, `activo`, `clave_puesta`, `configurado`, `disponible`, los proveedores con sus modelos sugeridos y lo gastado en 30 días (`uso_30_dias`: `llamadas`, `entrada`, `salida`, en tokens). Solo `admin`. |
+| `PUT /v1/org/ia` | Las credenciales: `proveedor` (`anthropic` o `gemini`), `modelo`, `clave` y `activo`. Son de la organización, con su propia cuenta en el proveedor: el hub no trae una clave propia ni le presta a una organización la de otra. La `clave` no vuelve nunca; si no viene se queda la que estaba, salvo que cambie el proveedor. `{"quitar": true}` lo borra. Solo `admin`. `GET /v1/yo` dice `ia: true` si la organización tiene asistente. |
+| `POST /v1/org/ia/prueba` | Una pregunta mínima al proveedor con lo guardado. Si no contesta, `502` con el motivo: `ia_clave_invalida`, `ia_modelo_no_existe`, `ia_sin_saldo`, `ia_limite`, `ia_proveedor_caido`, `ia_sin_conexion`, `ia_sin_respuesta`, `ia_proveedor_error`. |
 | `POST /v1/org/correo/prueba` | Manda un correo de prueba a quien lo pide. Si el servidor no lo acepta, `502` con lo que contestó (`correo_autenticacion`, `correo_conexion`, `correo_tls`, `correo_sin_starttls`, `correo_rechazado`, `correo_tiempo`). |
 
 El historial de reportes se borra solo pasados `dias_historial` (90 por

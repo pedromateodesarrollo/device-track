@@ -24,8 +24,8 @@ void registraRutasDispositivo(Servidor s, Ordenes ordenes, Alertas alertas) {
     if (!freno.cabe('alta:${p.ip}')) {
       return Respuesta.falla(429, 'demasiados_intentos', 'Espera un minuto');
     }
-    final codigo = Servidor.credencialDe(p.crudo).isNotEmpty
-        ? Servidor.credencialDe(p.crudo)
+    final codigo = Servidor.credencialDe(p.crudo!).isNotEmpty
+        ? Servidor.credencialDe(p.crudo!)
         : p.texto('codigo');
     final partes = Seguridad.partesCredencial(codigo);
     if (partes == null || partes[0] != 'dta') {

@@ -1,6 +1,7 @@
 import '../correo.dart';
 import '../db.dart';
 import '../dominios.dart';
+import '../ia/config.dart';
 import '../limitador.dart';
 import '../log.dart';
 import '../seguridad.dart';
@@ -154,12 +155,16 @@ void registraRutasAuth(Servidor s) {
       return Respuesta.ok({'org': p.s.org, 'llave': p.s.llave, 'rol': 'api', 'dominios': dominios});
     }
     final u = await p.bd.fila(
-      '''select u.id, u.correo, u.nombre, u.rol, u.org, o.nombre as organizacion
+      '''select u.id, u.correo, u.nombre, u.rol, u.org, o.nombre as organizacion, o.ia
            from dt.usuario u join dt.org o on o.id = u.org
           where u.id = @i''',
       {'i': p.s.usuario},
     );
-    return u == null ? Respuesta.falla(404, 'no_encontrado', '') : Respuesta.ok({...u, 'dominios': dominios});
+    if (u == null) return Respuesta.falla(404, 'no_encontrado', '');
+    // Si la organización tiene asistente: el panel enseña el chat y deja
+    // cambiar los tableros. Las credenciales no salen de aquí.
+    final ia = ConfigIa.deJson(u.remove('ia'))?.disponible ?? false;
+    return Respuesta.ok({...u, 'dominios': dominios, 'ia': ia});
   });
 
   s.ruta('GET', '/v1/usuarios', (p) async {

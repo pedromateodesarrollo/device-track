@@ -545,3 +545,83 @@ table.compacta th, table.compacta td { padding: 6px 8px; }
 /* Capturas en la portada. */
 .captura { display: block; max-width: 100%; margin: 28px auto 0; border: 1px solid var(--borde); border-radius: var(--radio); box-shadow: 0 8px 30px rgba(15, 23, 42, .08); }
 .captura-celular { width: 300px; }
+
+/* ---------------------------------------------------------------- tableros */
+.pestanas { display: flex; gap: 6px; flex-wrap: wrap; margin: 4px 0 12px; }
+.pestanas button {
+  border: 1px solid var(--borde); background: var(--fondo); color: var(--texto-2);
+  border-radius: 999px; padding: 6px 14px; font: inherit; font-size: 14px; cursor: pointer;
+}
+.pestanas button.activo { background: var(--marca); border-color: var(--marca); color: #fff; }
+.pestanas button.activo .apagado { color: #ffffffcc; }
+.acciones-tablero { flex-wrap: wrap; margin-bottom: 4px; }
+.rejilla-paneles { display: grid; gap: 14px; margin-top: 14px; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); }
+.panel-tablero { position: relative; min-width: 0; }
+.panel-tablero.doble { grid-column: span 2; }
+.cabeza-panel { display: flex; align-items: baseline; gap: 10px; margin-bottom: 10px; }
+.cabeza-panel h3 { margin: 0; font-size: 16px; }
+.quitar-panel {
+  margin-left: auto; border: 0; background: transparent; color: var(--texto-2); cursor: pointer;
+  font: inherit; font-size: 18px; line-height: 1; padding: 0 2px;
+}
+.cifra .quitar-panel { position: absolute; top: 8px; right: 10px; }
+.quitar-panel.confirma { color: var(--mal); font-size: 13px; font-weight: 600; }
+.numero-grande { font-size: 40px; font-weight: 700; margin: 0; }
+.barra-fila { display: grid; grid-template-columns: minmax(80px, 34%) 1fr auto; gap: 10px; align-items: center; margin: 6px 0; font-size: 14px; }
+.barra-etiqueta { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.barra-pista { height: 10px; background: var(--fondo-3); border-radius: 999px; overflow: hidden; }
+.barra-relleno { display: block; height: 100%; border-radius: 999px; min-width: 3px; }
+.barra-valor { font-variant-numeric: tabular-nums; color: var(--texto-2); }
+.dona { display: flex; gap: 18px; align-items: center; flex-wrap: wrap; }
+.dona-svg { width: 150px; height: 150px; transform: rotate(0deg); }
+.dona-total { font-size: 8px; font-weight: 700; fill: var(--texto); }
+.leyenda-dona { list-style: none; padding: 0; margin: 0; font-size: 14px; display: grid; gap: 4px; }
+.leyenda-dona i { display: inline-block; width: 10px; height: 10px; border-radius: 3px; margin-right: 7px; }
+.tabla-panel { overflow-x: auto; }
+.tabla-panel table { font-size: 14px; }
+.mapa-panel { height: 300px; }
+@media (max-width: 760px) {
+  .panel-tablero.doble { grid-column: auto; }
+  .rejilla-paneles { grid-template-columns: 1fr; }
+}
+
+/* --------------------------------------------------------------- asistente */
+.asistente { display: grid; grid-template-columns: 240px 1fr; gap: 20px; height: calc(100vh - 150px); min-height: 460px; }
+.conversaciones { border-right: 1px solid var(--borde); padding-right: 14px; overflow-y: auto; }
+.conversaciones ul { list-style: none; padding: 0; margin: 12px 0 0; display: grid; gap: 2px; }
+.conversaciones li { display: flex; align-items: center; border-radius: 8px; }
+.conversaciones li.activa, .conversaciones li:hover { background: var(--fondo-2); }
+.titulo-conv {
+  flex: 1; min-width: 0; text-align: left; border: 0; background: transparent; color: var(--texto);
+  font: inherit; font-size: 14px; padding: 7px 8px; cursor: pointer; display: grid; gap: 1px;
+}
+.borrar-conv { border: 0; background: transparent; color: var(--texto-2); cursor: pointer; font-size: 16px; padding: 4px 8px; }
+.chat { display: flex; flex-direction: column; min-width: 0; min-height: 0; }
+.ver-conversaciones { display: none; }
+.mensajes { flex: 1; overflow-y: auto; padding: 4px 2px 12px; display: flex; flex-direction: column; gap: 12px; }
+.vacio { margin: auto 0; max-width: 620px; }
+.sugerencias { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
+.sugerencias .boton { white-space: normal; text-align: left; }
+.burbuja { max-width: min(760px, 92%); border-radius: 14px; padding: 10px 14px; line-height: 1.55; overflow-wrap: anywhere; }
+.burbuja.persona { align-self: flex-end; background: var(--marca); color: #fff; white-space: pre-wrap; }
+.burbuja.asistente-msg { align-self: flex-start; background: var(--fondo-2); border: 1px solid var(--borde); }
+.burbuja .md > :last-child { margin-bottom: 0; }
+.burbuja .md p { margin: 0 0 10px; }
+.consultas { font-size: 12px; color: var(--texto-2); margin: 0 0 6px; }
+.avance p { margin: 2px 0; font-size: 14px; }
+.propuesta {
+  margin-top: 10px; padding: 10px 12px; border: 1px solid color-mix(in srgb, var(--marca) 45%, var(--borde));
+  border-radius: 10px; background: var(--fondo);
+}
+.propuesta dl { display: grid; grid-template-columns: auto 1fr; gap: 2px 12px; font-size: 13px; margin: 8px 0 10px; }
+.propuesta dt { color: var(--texto-2); }
+.propuesta dd { margin: 0; overflow-wrap: anywhere; }
+.entrada-chat { display: flex; gap: 10px; align-items: flex-end; margin-top: 8px; }
+.entrada-chat textarea { flex: 1; resize: vertical; min-height: 48px; max-height: 220px; }
+@media (max-width: 860px) {
+  .asistente { grid-template-columns: 1fr; height: calc(100dvh - 170px); }
+  .conversaciones { display: none; border: 0; padding: 0; }
+  .conversaciones.abierta { display: block; position: absolute; inset: 140px 16px auto 16px; z-index: 20; max-height: 60vh; background: var(--fondo); border: 1px solid var(--borde); border-radius: var(--radio); padding: 12px; box-shadow: 0 10px 30px rgba(0,0,0,.2); }
+  .ver-conversaciones { display: inline-flex; }
+  .burbuja { max-width: 100%; }
+}

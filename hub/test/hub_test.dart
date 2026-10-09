@@ -11,6 +11,7 @@ import 'package:device_track_hub/src/http/rutas_auth.dart';
 import 'package:device_track_hub/src/seguridad.dart';
 import 'package:test/test.dart';
 
+import 'ia_falso.dart';
 import 'smtp_falso.dart';
 
 /// El hub de punta a punta contra un Postgres de verdad.
@@ -32,6 +33,7 @@ void main() {
   late int org;
   late String admin; // JWT de una persona administradora
   late String consulta; // JWT de una persona que solo mira
+  late IaFalso ia; // el proveedor de IA, de mentira
 
   Future<(int, Map<String, dynamic>)> pide(
     String metodo,
@@ -104,6 +106,7 @@ void main() {
     final bd = await Bd.abrir(url);
     await bd.ejecuta('drop schema if exists dt cascade');
     await bd.cerrar();
+    ia = await IaFalso.arranca();
     hub = await Hub.arranca(
       Config.desdeEntorno({
         'DT_DATABASE_URL': url,
@@ -114,6 +117,7 @@ void main() {
         'DT_URL_PUBLICA': 'http://127.0.0.1',
       }),
       relojes: false,
+      baseIa: ia.base,
     );
     base = 'http://127.0.0.1:${hub.puerto}';
     org = await creaOrg(hub.bd, 'Prueba');
@@ -121,7 +125,10 @@ void main() {
     consulta = await persona('mira@prueba.do', 'consulta');
   });
 
-  tearDownAll(() async => hub.detiene());
+  tearDownAll(() async {
+    await hub.detiene();
+    await ia.cierra();
+  });
 
   test('alta: el agente y una app en el mismo teléfono son un solo equipo', () async {
     final almacen = await dominio('Almacén A13');
@@ -720,5 +727,364 @@ void main() {
     } finally {
       await smtp.cierra();
     }
+  });
+
+  test('avisos por correo: la regla escribe a su lista, una vez por hora', () async {
+    final smtp = await SmtpFalso.arranca();
+    try {
+      final (st0, _) = await pide('PUT', '/v1/org/correo',
+          json: {'host': '127.0.0.1', 'puerto': smtp.puerto, 'seguridad': 'ninguna', 'remitente': 'avisos@prueba.do'},
+          token: admin);
+      expect(st0, 200);
+      final d = await dominio('Avisados');
+      final a = await alta(await codigo(dominio: d['id']), 'huella-avisos');
+      final cred = a['credencial'] as String;
+
+      var (st, r) = await pide('POST', '/v1/reglas',
+          json: {'tipo': 'bateria_baja', 'dominio': d['id'], 'avisar': ['no es correo']}, token: admin);
+      expect(st, 400);
+      expect(r['error'], 'avisar_invalido');
+      (st, r) = await pide('POST', '/v1/reglas',
+          json: {
+            'nombre': 'Batería de Avisados',
+            'tipo': 'bateria_baja',
+            'dominio': d['id'],
+            'parametros': {'porcentaje': 20},
+            'avisar': ['Jefe@Prueba.do', 'jefe@prueba.do', 'otra@prueba.do'],
+          },
+          token: admin);
+      expect(st, 201, reason: '$r');
+      expect(r['avisar'], ['jefe@prueba.do', 'otra@prueba.do']);
+      final regla = r['id'];
+
+      Future<void> reporta(int bateria, bool cargando) async {
+        await pide('POST', '/v1/reporte', json: {'bateria': bateria, 'cargando': cargando}, token: cred);
+        await Future<void>.delayed(const Duration(milliseconds: 400));
+      }
+
+      await reporta(8, false);
+      expect(smtp.mensajes, hasLength(2));
+      expect(smtp.ordenes, containsAll(['RCPT TO:<jefe@prueba.do>', 'RCPT TO:<otra@prueba.do>']));
+      expect(SmtpFalso.parte(smtp.mensajes.first, 'text/plain'), contains('Batería de Avisados: 8 % (umbral 20 %)'));
+      expect(SmtpFalso.parte(smtp.mensajes.first, 'text/plain'), contains('http://127.0.0.1/#/panel/equipos/'));
+
+      // Se carga y se vuelve a descargar enseguida: otra alerta, sin correo.
+      await reporta(30, true);
+      await reporta(7, false);
+      final (_, al) = await pide('GET', '/v1/alertas?equipo=${a['equipo']['id']}&todas=1', token: admin);
+      expect((al['alertas'] as List).where((x) => x['regla'] == regla).length, greaterThanOrEqualTo(1));
+      expect(smtp.mensajes, hasLength(2));
+
+      // PATCH sin `avisar` deja la lista; con lista vacía, la quita.
+      (st, r) = await pide('PATCH', '/v1/reglas/$regla', json: {'nombre': 'Batería'}, token: admin);
+      expect(r['avisar'], ['jefe@prueba.do', 'otra@prueba.do']);
+      (st, r) = await pide('PATCH', '/v1/reglas/$regla', json: {'avisar': []}, token: admin);
+      expect(r['avisar'], isEmpty);
+    } finally {
+      await pide('PUT', '/v1/org/correo', json: {'quitar': true}, token: admin);
+      await smtp.cierra();
+    }
+  });
+
+  test('asistente IA: credenciales de cada organización, la clave no vuelve, y la prueba', () async {
+    var (st, d) = await pide('GET', '/v1/yo', token: admin);
+    expect(d['ia'], isFalse);
+    (st, d) = await pide('GET', '/v1/org/ia', token: admin);
+    expect(st, 200);
+    expect(d['configurado'], isFalse);
+    expect(d['proveedores'], contains('anthropic'));
+    (st, d) = await pide('GET', '/v1/org/ia', token: consulta);
+    expect(st, 403);
+    (st, d) = await pide('POST', '/v1/org/ia/prueba', token: admin);
+    expect(d['error'], 'ia_sin_configurar');
+
+    final config = {'proveedor': 'anthropic', 'modelo': 'claude-opus-5-5', 'clave': 'sk-ant-secreta'};
+    (st, _) = await pide('PUT', '/v1/org/ia', json: config, token: consulta);
+    expect(st, 403);
+    (st, d) = await pide('PUT', '/v1/org/ia', json: {...config, 'proveedor': 'openai'}, token: admin);
+    expect(d['error'], 'proveedor_invalido');
+    (st, d) = await pide('PUT', '/v1/org/ia', json: {...config, 'modelo': '../../v1/otra'}, token: admin);
+    expect(d['error'], 'modelo_invalido');
+    (st, d) = await pide('PUT', '/v1/org/ia', json: {...config, 'clave': ''}, token: admin);
+    expect(d['error'], 'falta_clave');
+
+    (st, d) = await pide('PUT', '/v1/org/ia', json: config, token: admin);
+    expect(st, 200, reason: '$d');
+    expect(d['clave_puesta'], isTrue);
+    expect(d['disponible'], isTrue);
+    expect(jsonEncode(d), isNot(contains('sk-ant-secreta')));
+    (st, d) = await pide('GET', '/v1/org/ia', token: admin);
+    expect(jsonEncode(d), isNot(contains('sk-ant-secreta')));
+    (st, d) = await pide('GET', '/v1/yo', token: consulta);
+    expect(d['ia'], isTrue);
+    expect(jsonEncode(d), isNot(contains('sk-ant-secreta')));
+
+    // Otro modelo sin clave: se queda la que estaba.
+    (st, d) = await pide('PUT', '/v1/org/ia',
+        json: {'proveedor': 'anthropic', 'modelo': 'claude-sonnet-5-5'}, token: admin);
+    expect(d['clave_puesta'], isTrue);
+    // Otro proveedor sin clave: la de Anthropic no sirve en Gemini.
+    (st, d) = await pide('PUT', '/v1/org/ia', json: {'proveedor': 'gemini'}, token: admin);
+    expect(d['error'], 'falta_clave');
+
+    (st, d) = await pide('POST', '/v1/org/ia/prueba', token: admin);
+    expect(st, 200, reason: '$d');
+    expect(d['funciona'], isTrue);
+    expect(d['respuesta'], 'Listo, funciono');
+    final pet = ia.peticiones.last;
+    expect(pet.cabeceras['x-api-key'], 'sk-ant-secreta');
+    expect(pet.cuerpo['model'], 'claude-sonnet-5-5');
+    final uso = await hub.bd.fila(
+      "select origen, modelo, entrada, salida from dt.ia_uso where org = @o order by id desc limit 1",
+      {'o': org},
+    );
+    expect(uso, {'origen': 'prueba', 'modelo': 'claude-sonnet-5-5', 'entrada': 12, 'salida': 5});
+
+    // Otra organización no ve ni usa estas credenciales.
+    final otra = await creaOrg(hub.bd, 'Otra');
+    await hub.bd.ejecuta(
+      '''insert into dt.usuario (org, correo, clave_hash, nombre, rol) values (@o, 'admin@otra.do', @h, 'x', 'admin')''',
+      {'o': otra, 'h': Seguridad.hashClave('clave-de-prueba', iteraciones: 1000)},
+    );
+    final (_, login) = await pide('POST', '/v1/auth/login', json: {'correo': 'admin@otra.do', 'clave': 'clave-de-prueba'});
+    final adminOtra = login['token'] as String;
+    (st, d) = await pide('GET', '/v1/org/ia', token: adminOtra);
+    expect(d['configurado'], isFalse);
+    (st, d) = await pide('GET', '/v1/yo', token: adminOtra);
+    expect(d['ia'], isFalse);
+
+    // Clave mala: el código, sin la clave.
+    (st, d) = await pide('PUT', '/v1/org/ia', json: {...config, 'clave': 'mala'}, token: admin);
+    (st, d) = await pide('POST', '/v1/org/ia/prueba', token: admin);
+    expect(st, 502);
+    expect(d['error'], 'ia_clave_invalida');
+
+    // Apagado conserva la clave y quita el asistente.
+    (st, d) = await pide('PUT', '/v1/org/ia', json: {...config, 'activo': false}, token: admin);
+    expect(d['clave_puesta'], isTrue);
+    (st, d) = await pide('GET', '/v1/yo', token: admin);
+    expect(d['ia'], isFalse);
+
+    (st, d) = await pide('PUT', '/v1/org/ia', json: {'quitar': true}, token: admin);
+    expect(d['configurado'], isFalse);
+  });
+
+  /// Una pregunta al chat: las líneas NDJSON, ya decodificadas.
+  Future<List<Map<String, dynamic>>> chat(String mensaje, {int? conversacion, required String token}) async {
+    final c = HttpClient();
+    try {
+      final r = await c.openUrl('POST', Uri.parse('$base/v1/ia/chat'));
+      r.headers.set('authorization', 'Bearer $token');
+      r.headers.contentType = ContentType.json;
+      r.write(jsonEncode({'mensaje': mensaje, 'conversacion': ?conversacion, 'desfase_min': -240}));
+      final res = await r.close();
+      final texto = await utf8.decodeStream(res);
+      if (res.statusCode != 200) return [Map<String, dynamic>.from(jsonDecode(texto) as Map)..['_estado'] = res.statusCode];
+      expect(res.headers.contentType?.mimeType, 'application/x-ndjson');
+      return [
+        for (final l in const LineSplitter().convert(texto))
+          if (l.trim().isNotEmpty) Map<String, dynamic>.from(jsonDecode(l) as Map),
+      ];
+    } finally {
+      c.close();
+    }
+  }
+
+  test('chat: consulta, propone una regla, se confirma, y el asistente se entera', () async {
+    var (st, d) = await pide('PUT', '/v1/org/ia',
+        json: {'proveedor': 'anthropic', 'modelo': 'claude-opus-5-5', 'clave': 'sk-ant-chat'}, token: admin);
+    expect(st, 200, reason: '$d');
+    final dom = await dominio('Chat');
+    final eq = await alta(await codigo(dominio: dom['id']), 'huella-chat');
+    final reglasAntes = ((await pide('GET', '/v1/reglas', token: admin)).$2['reglas'] as List).length;
+
+    ia.peticiones.clear();
+    ia.respuestas
+      ..add((
+        200,
+        {
+          'content': [
+            {'type': 'thinking', 'thinking': '', 'signature': 'firma-a'},
+            {'type': 'tool_use', 'id': 't1', 'name': 'listar_equipos', 'input': {'dominio': 'chat'}},
+          ],
+          'stop_reason': 'tool_use',
+          'usage': {'input_tokens': 900, 'output_tokens': 30},
+        },
+      ))
+      ..add((
+        200,
+        {
+          'content': [
+            {'type': 'text', 'text': 'Te propongo la regla.'},
+            {
+              'type': 'tool_use',
+              'id': 't2',
+              'name': 'crear_regla',
+              'input': {
+                'tipo': 'bateria_baja',
+                'nombre': 'Batería del chat',
+                'dominio': 'chat',
+                'parametros': {'porcentaje': 25},
+                'avisar': ['jefe@prueba.do'],
+                'resumen': 'Crear la regla Batería del chat: por debajo de 25 %, avisando a jefe@prueba.do',
+              },
+            },
+          ],
+          'stop_reason': 'tool_use',
+          'usage': {'input_tokens': 1200, 'output_tokens': 60},
+        },
+      ))
+      ..add((200, IaFalso.anthropicTexto('Listo: te dejé propuesta la regla; confírmala abajo.')));
+
+    final eventos = await chat('Avísame cuando una terminal de Chat baje de 25 %', token: admin);
+    final tipos = eventos.map((e) => e['tipo']).toList();
+    expect(tipos.first, 'conversacion');
+    expect(tipos, containsAll(['herramienta', 'nota', 'propuesta', 'respuesta', 'fin']));
+    final conv = eventos.first['id'] as int;
+    final propuesta = eventos.firstWhere((e) => e['tipo'] == 'propuesta')['propuesta'] as Map;
+    expect(propuesta['resumen'], startsWith('Crear la regla Batería del chat'));
+    expect((propuesta['args'] as Map).containsKey('resumen'), isFalse);
+    expect(eventos.firstWhere((e) => e['tipo'] == 'respuesta')['texto'], contains('confírmala'));
+
+    // Lo que vio el modelo: la herramienta con la sesión de la persona, el
+    // turno con su razonamiento intacto, y la hora de la persona.
+    expect(ia.peticiones, hasLength(3));
+    final primera = ia.peticiones.first.cuerpo;
+    final pregunta = ((primera['messages'] as List).last as Map)['content'][0]['text'] as String;
+    expect(pregunta, startsWith('[Ahora, para la persona:'));
+    expect(pregunta, contains('(UTC−04:00)'));
+    expect(pregunta, endsWith('Avísame cuando una terminal de Chat baje de 25 %'));
+    final segunda = ia.peticiones[1].cuerpo['messages'] as List;
+    expect((segunda[1] as Map)['content'][0], {'type': 'thinking', 'thinking': '', 'signature': 'firma-a'});
+    final resultado = jsonDecode(((segunda[2] as Map)['content'] as List).first['content'] as String) as Map;
+    expect((resultado['equipos'] as List).single['id'], eq['equipo']['id']);
+    final nombres = [for (final t in primera['tools'] as List) t['name']];
+    expect(nombres, containsAll(['listar_equipos', 'crear_regla', 'ordenar_equipo', 'agregar_panel']));
+
+    // Propuesta: la regla todavía no existe (el ensayo se deshizo).
+    expect(((await pide('GET', '/v1/reglas', token: admin)).$2['reglas'] as List).length, reglasAntes);
+    (st, d) = await pide('GET', '/v1/ia/conversaciones/$conv', token: admin);
+    expect((d['vista'] as List).length, 2);
+    expect((d['propuestas'] as List).single['estado'], 'pendiente');
+    // Otra persona no la confirma.
+    (st, d) = await pide('POST', '/v1/ia/propuestas/${propuesta['id']}/confirmar', token: consulta);
+    expect(st, 404);
+
+    (st, d) = await pide('POST', '/v1/ia/propuestas/${propuesta['id']}/confirmar', token: admin);
+    expect(st, 200, reason: '$d');
+    expect(d['estado'], 'hecha');
+    final reglas = (await pide('GET', '/v1/reglas', token: admin)).$2['reglas'] as List;
+    final creada = reglas.firstWhere((r) => r['nombre'] == 'Batería del chat');
+    expect(creada['avisar'], ['jefe@prueba.do']);
+    expect(creada['dominio'], dom['id']);
+    (st, d) = await pide('POST', '/v1/ia/propuestas/${propuesta['id']}/confirmar', token: admin);
+    expect(d['error'], 'propuesta_resuelta');
+
+    // La pregunta siguiente le cuenta al modelo que se confirmó.
+    ia.peticiones.clear();
+    final otra = await chat('¿Quedó?', conversacion: conv, token: admin);
+    expect(otra.first['id'], conv);
+    final ultima = (ia.peticiones.single.cuerpo['messages'] as List).last as Map;
+    expect(ultima['content'][0]['text'], contains('la confirmó y quedó hecha'));
+    expect(ia.peticiones.single.cuerpo['messages'] as List, hasLength(7));
+
+    // Quien solo consulta no recibe herramientas para cambiar.
+    ia.peticiones.clear();
+    await chat('Hola', token: consulta);
+    final deConsulta = [for (final t in ia.peticiones.single.cuerpo['tools'] as List) t['name']];
+    expect(deConsulta, contains('listar_equipos'));
+    expect(deConsulta, isNot(contains('crear_regla')));
+    expect(deConsulta, isNot(contains('listar_usuarios')));
+
+    // Un error del proveedor no deja la pregunta a medias en la conversación.
+    ia.respuestas.add((529, {'error': {'message': 'Overloaded'}}));
+    final fallida = await chat('Otra', conversacion: conv, token: admin);
+    expect(fallida.last['tipo'], 'error');
+    expect(fallida.last['error'], 'ia_proveedor_caido');
+    (st, d) = await pide('GET', '/v1/ia/conversaciones/$conv', token: admin);
+    expect((d['vista'] as List).length, 4);
+
+    final uso = await hub.bd.fila("select count(*)::int as n from dt.ia_uso where org = @o and origen = 'chat'", {'o': org});
+    expect(uso!['n'], greaterThanOrEqualTo(5));
+
+    (st, d) = await pide('PUT', '/v1/org/ia', json: {'quitar': true}, token: admin);
+    final sin = await chat('Hola', token: admin);
+    expect(sin.single['error'], 'ia_no_disponible');
+  });
+
+  test('tableros: el Resumen de siempre, uno propio con IA, compartido y sus datos', () async {
+    var (st, d) = await pide('GET', '/v1/tableros', token: consulta);
+    expect(st, 200);
+    expect((d['tableros'] as List).first['id'], 0);
+    (st, d) = await pide('GET', '/v1/tableros/0/datos', token: consulta);
+    expect(st, 200, reason: '$d');
+    final cifras = {for (final p in d['paneles'] as List) p['id']: p};
+    expect(cifras['equipos']['datos']['valor'], greaterThan(0));
+    expect(cifras['lista-alertas']['datos']['columnas'], isNotEmpty);
+
+    // Sin IA no se arman.
+    (st, d) = await pide('POST', '/v1/tableros', json: {'nombre': 'Mío'}, token: admin);
+    expect(d['error'], 'ia_no_disponible');
+    await pide('PUT', '/v1/org/ia', json: {'proveedor': 'anthropic', 'modelo': 'claude-opus-5-5', 'clave': 'sk'}, token: admin);
+
+    (st, d) = await pide('POST', '/v1/tableros',
+        json: {
+          'nombre': 'Terminales',
+          'desde_resumen': true,
+          'paneles': [
+            {'titulo': 'Por estado', 'fuente': 'equipos', 'forma': 'dona', 'agrupar': 'estado'},
+          ],
+        },
+        token: admin);
+    expect(st, 201, reason: '$d');
+    final t = d['id'];
+    expect((d['paneles'] as List).length, 7);
+
+    (st, d) = await pide('POST', '/v1/tableros/$t/paneles',
+        json: {'titulo': 'Mal', 'fuente': 'equipos', 'forma': 'barras', 'agrupar': 'color'}, token: admin);
+    expect(st, 400);
+    expect(d['error'], 'panel_invalido');
+    expect(d['mensaje'], contains('agrupar es'));
+    (st, d) = await pide('POST', '/v1/tableros/$t/paneles',
+        json: {'titulo': 'De un dominio que no existe', 'fuente': 'equipos', 'forma': 'cifra', 'filtros': {'dominio': 'no-hay'}},
+        token: admin);
+    expect(d['mensaje'], contains('El panel no sale'));
+    (st, d) = await pide('POST', '/v1/tableros/$t/paneles',
+        json: {'titulo': 'Batería', 'fuente': 'equipos', 'forma': 'barras', 'agrupar': 'bateria', 'posicion': 0},
+        token: admin);
+    expect(st, 201, reason: '$d');
+    final panel = (d['paneles'] as List).first['id'];
+    (st, d) = await pide('PUT', '/v1/tableros/$t/paneles/$panel',
+        json: {'titulo': 'Equipos', 'fuente': 'equipos', 'forma': 'tabla', 'columnas': ['nombre', 'bateria'], 'limite': 3},
+        token: admin);
+    expect(st, 200, reason: '$d');
+
+    (st, d) = await pide('GET', '/v1/tableros', token: admin);
+    expect((d['tableros'] as List).map((x) => x['id']), isNot(contains(0)));
+    (st, d) = await pide('GET', '/v1/tableros/$t/datos', token: admin);
+    final tabla = (d['paneles'] as List).firstWhere((p) => p['id'] == panel);
+    expect((tabla['datos']['filas'] as List).length, lessThanOrEqualTo(3));
+    expect(tabla['datos']['columnas'][1]['titulo'], 'Batería');
+    final dona = (d['paneles'] as List).firstWhere((p) => p['titulo'] == 'Por estado');
+    expect(dona['datos']['series'], isNotEmpty);
+
+    // Ajeno y sin compartir: no existe. Compartido: lo ve, sin poder tocarlo.
+    (st, d) = await pide('GET', '/v1/tableros/$t', token: consulta);
+    expect(st, 404);
+    await pide('PATCH', '/v1/tableros/$t', json: {'compartido': true}, token: admin);
+    (st, d) = await pide('GET', '/v1/tableros', token: consulta);
+    final visto = (d['tableros'] as List).firstWhere((x) => x['id'] == t);
+    expect(visto['propio'], isFalse);
+    (st, d) = await pide('DELETE', '/v1/tableros/$t/paneles/$panel', token: consulta);
+    expect(st, 404);
+
+    // Quitar paneles y borrar, también sin IA.
+    await pide('PUT', '/v1/org/ia', json: {'quitar': true}, token: admin);
+    (st, d) = await pide('DELETE', '/v1/tableros/$t/paneles/$panel', token: admin);
+    expect(st, 200);
+    (st, _) = await pide('DELETE', '/v1/tableros/$t', token: admin);
+    expect(st, 204);
+    (st, d) = await pide('GET', '/v1/tableros', token: admin);
+    expect((d['tableros'] as List).first['id'], 0);
   });
 }

@@ -1,7 +1,8 @@
 <script setup>
 import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
 import { api, sesion, acotado, alcanceTexto } from '../api.js'
-import Resumen from './Resumen.vue'
+import Tableros from './Tableros.vue'
+import Asistente from './Asistente.vue'
 import Equipos from './Equipos.vue'
 import EquipoDetalle from './EquipoDetalle.vue'
 import MapaEquipos from './MapaEquipos.vue'
@@ -34,7 +35,9 @@ const seccion = computed(() => partes.value[0] || 'inicio')
 const equipo = computed(() => (seccion.value === 'equipos' && partes.value[1] ? Number(partes.value[1]) : 0))
 
 const secciones = computed(() => [
-  ['inicio', 'Resumen'],
+  ['inicio', 'Inicio'],
+  // El chat, solo si la organización tiene el asistente encendido.
+  ...(yo.value?.ia ? [['asistente', 'Asistente']] : []),
   ['equipos', 'Equipos'],
   ['mapa', 'Mapa'],
   ['alertas', 'Alertas'],
@@ -171,7 +174,8 @@ function sale() {
       <Usuarios v-else-if="seccion === 'usuarios'" :yo="yo" />
       <Llaves v-else-if="seccion === 'llaves'" />
       <Cuenta v-else-if="seccion === 'cuenta'" :yo="yo" />
-      <Resumen v-else :yo="yo" />
+      <Asistente v-else-if="seccion === 'asistente'" :key="filtros.pregunta || ''" :yo="yo" :pregunta="filtros.pregunta || ''" />
+      <Tableros v-else :yo="yo" />
     </main>
   </div>
 </template>

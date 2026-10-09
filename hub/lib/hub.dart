@@ -10,11 +10,14 @@ import 'dart:io';
 import 'src/alertas.dart';
 import 'src/config.dart';
 import 'src/db.dart';
+import 'src/http/rutas_asistente.dart';
 import 'src/http/rutas_auth.dart';
 import 'src/http/rutas_dispositivo.dart';
 import 'src/http/rutas_dominios.dart';
+import 'src/http/rutas_ia.dart';
 import 'src/http/rutas_llaves.dart';
 import 'src/http/rutas_panel.dart';
+import 'src/http/rutas_tableros.dart';
 import 'src/http/servidor.dart';
 import 'src/log.dart';
 import 'src/mantenimiento.dart';
@@ -42,13 +45,14 @@ class Hub {
     Config config, {
     String migraciones = 'migraciones',
     bool relojes = true,
+    Uri? baseIa,
   }) async {
     final bd = await Bd.abrir(config.urlBd);
     await bd.migrar(migraciones);
 
     final canal = Canal(bd);
     final ordenes = Ordenes(bd, canal);
-    final alertas = Alertas(bd);
+    final alertas = Alertas(bd, urlPublica: config.urlPublica);
     final mantenimiento = Mantenimiento(bd, ordenes);
     // Al conectar: lo que tenía esperando y, como hubo contacto, fuera la
     // alerta de «sin reporte».
@@ -64,6 +68,9 @@ class Hub {
     registraRutasDominios(servidor);
     registraRutasDispositivo(servidor, ordenes, alertas);
     registraRutasPanel(servidor, canal, ordenes, alertas);
+    registraRutasIa(servidor, base: baseIa);
+    registraRutasTableros(servidor);
+    registraRutasAsistente(servidor, base: baseIa);
 
     // Al arrancar no hay ningún socket: lo que diga la base es de antes del
     // reinicio. Se limpia para no enseñar equipos fantasma como conectados.

@@ -231,3 +231,62 @@ export function colorEquipo(e) {
   if (e.conectado) return 'ok'
   return 'gris'
 }
+
+/// Lo que dice un error del asistente de IA, en simple. El detalle técnico
+/// (lo que contestó el proveedor) va entre paréntesis por si hace falta.
+const erroresIa = {
+  ia_clave_invalida: 'El proveedor no aceptó la clave: revisa que esté completa y que sea de ese proveedor.',
+  ia_modelo_no_existe: 'Ese modelo no existe en tu cuenta del proveedor, o está mal escrito.',
+  ia_sin_saldo: 'Tu cuenta del proveedor se quedó sin saldo: recárgala en su consola.',
+  ia_limite: 'El proveedor dice que se pasó su límite de peticiones: espera un minuto.',
+  ia_proveedor_caido: 'El proveedor no está respondiendo bien ahora: prueba en un rato.',
+  ia_sin_conexion: 'El hub no pudo hablar con el proveedor.',
+  ia_sin_respuesta: 'El proveedor tardó demasiado en contestar.',
+}
+
+export function explicaIa(e) {
+  const simple = erroresIa[e?.codigo]
+  return simple ? `${simple} (${e.message})` : e?.message || String(e)
+}
+
+/// Una pregunta al asistente. El hub contesta en NDJSON (una línea JSON por
+/// evento) y [alEvento] recibe cada uno según llega: `conversacion`, `nota`,
+/// `herramienta`, `propuesta`, `respuesta`, `fin` o `error`. Si el hub no
+/// acepta la pregunta (sin asistente, conversación muy larga) lanza el error
+/// de siempre, con su `codigo`.
+export async function preguntaAlAsistente(cuerpo, alEvento) {
+  let r
+  try {
+    r = await fetch('/v1/ia/chat', {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        ...(sesion.token ? { authorization: `Bearer ${sesion.token}` } : {}),
+      },
+      body: JSON.stringify({ ...cuerpo, desfase_min: -new Date().getTimezoneOffset() }),
+    })
+  } catch {
+    throw new Error('No se pudo hablar con el hub. Revisa la conexión.')
+  }
+  if (!r.ok) throw falla(r.status, await r.json().catch(() => ({})))
+  const lector = r.body.getReader()
+  const texto = new TextDecoder()
+  let resto = ''
+  const suelta = (linea) => {
+    if (!linea.trim()) return
+    try {
+      alEvento(JSON.parse(linea))
+    } catch { /* una línea rota no tumba la conversación */ }
+  }
+  for (;;) {
+    const { value, done } = await lector.read()
+    if (done) break
+    resto += texto.decode(value, { stream: true })
+    let i
+    while ((i = resto.indexOf('\n')) >= 0) {
+      suelta(resto.slice(0, i))
+      resto = resto.slice(i + 1)
+    }
+  }
+  suelta(resto + texto.decode())
+}

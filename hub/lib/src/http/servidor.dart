@@ -103,9 +103,16 @@ class Peticion {
     required this.config,
     required this.bd,
     this.equipo,
-  });
+    Map<String, String>? consulta,
+    String? urlPublica,
+  }) : _consulta = consulta,
+       _urlPublica = urlPublica;
 
-  final HttpRequest crudo;
+  /// La petición HTTP. Null en una llamada por dentro ([Servidor.interna]):
+  /// la del asistente, que usa las mismas rutas con la sesión de la persona.
+  final HttpRequest? crudo;
+  final Map<String, String>? _consulta;
+  final String? _urlPublica;
   final Map<String, String> params;
   final Map<String, Object?> cuerpo;
   final Sesion? sesion;
@@ -117,7 +124,7 @@ class Peticion {
   final Bd bd;
 
   Sesion get s => sesion!;
-  Map<String, String> get consulta => crudo.uri.queryParameters;
+  Map<String, String> get consulta => _consulta ?? crudo?.uri.queryParameters ?? const {};
 
   String texto(String clave, {String porDefecto = ''}) {
     final v = cuerpo[clave];
@@ -133,16 +140,21 @@ class Peticion {
   int enteroParam(String clave) => int.tryParse(params[clave] ?? '') ?? 0;
 
   /// IP de quien llama. Detrás de nginx, la que él dice en `X-Real-IP`.
-  String get ip =>
-      crudo.headers.value('x-real-ip')?.trim() ??
-      crudo.headers.value('x-forwarded-for')?.split(',').first.trim() ??
-      crudo.connectionInfo?.remoteAddress.address ??
-      '';
+  String get ip {
+    final c = crudo;
+    if (c == null) return 'interna';
+    return c.headers.value('x-real-ip')?.trim() ??
+        c.headers.value('x-forwarded-for')?.split(',').first.trim() ??
+        c.connectionInfo?.remoteAddress.address ??
+        '';
+  }
 
   /// URL con la que el mundo llega al hub, sin barra final. Si no se fijó en
   /// la configuración, se arma con lo que dice el proxy.
   String get urlPublica {
     if (config.urlPublica.isNotEmpty) return config.urlPublica;
+    final crudo = this.crudo;
+    if (crudo == null) return _urlPublica ?? '';
     final proto = crudo.headers.value('x-forwarded-proto')?.split(',').first.trim() ??
         (crudo.requestedUri.scheme);
     final host = crudo.headers.value('x-forwarded-host')?.split(',').first.trim() ??
@@ -227,6 +239,54 @@ class Servidor {
     Acceso acceso = Acceso.panel,
     String permiso = 'leer',
   }) => _rutas.add(_Ruta(metodo, patron, manejador, acceso, permiso));
+
+  /// Llama una ruta del panel por dentro, con [sesion]: la misma ruta y la
+  /// misma autorización que por HTTP (rol, permiso de la ruta, dominios).
+  /// Es lo que usa el asistente de IA: hace lo que la persona podría hacer
+  /// en la pantalla, ni más ni menos. Solo rutas del panel ([Acceso.panel], y
+  /// [Acceso.persona] si la sesión es de una persona).
+  ///
+  /// [bd] la corre dentro de una transacción abierta: así se ensaya un
+  /// cambio y se deshace (ver `ia/herramientas.dart`).
+  Future<Respuesta> interna(
+    String metodo,
+    String ruta, {
+    required Sesion sesion,
+    Map<String, String> consulta = const {},
+    Map<String, Object?> cuerpo = const {},
+    String urlPublica = '',
+    Bd? bd,
+  }) async {
+    final partes = ruta.split('/').where((s) => s.isNotEmpty).toList();
+    for (final r in _rutas) {
+      final params = r.casa(metodo, partes);
+      if (params == null) continue;
+      final vale = r.acceso == Acceso.panel || (r.acceso == Acceso.persona && sesion.esUsuario);
+      if (!vale) {
+        return Respuesta.falla(403, 'ruta_no_permitida', 'Esa ruta no se llama por dentro');
+      }
+      if (!sesion.puede(r.permiso)) {
+        return Respuesta.falla(403, 'sin_permiso', 'Hace falta el permiso «${r.permiso}»');
+      }
+      try {
+        return await r.manejador(Peticion(
+          crudo: null,
+          params: params,
+          cuerpo: cuerpo,
+          sesion: sesion,
+          config: config,
+          bd: bd ?? this.bd,
+          consulta: consulta,
+          urlPublica: urlPublica,
+        ));
+      } catch (e, t) {
+        final ref = DateTime.now().microsecondsSinceEpoch.toRadixString(36);
+        log.error('interna', 'err:$ref $metodo $ruta → $e\n$t');
+        return Respuesta.falla(500, 'error_interno', 'Error interno. Referencia: $ref');
+      }
+    }
+    return Respuesta.falla(404, 'no_encontrado', 'Ruta desconocida');
+  }
 
   Future<HttpServer> escuchar() async {
     final servidor = await HttpServer.bind(config.host, config.puerto, shared: true);

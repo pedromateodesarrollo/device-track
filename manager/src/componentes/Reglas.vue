@@ -169,7 +169,7 @@ const nombreZona = (id) => zonas.value.find((z) => z.id === Number(id))?.nombre
 
 // ================================================================= reglas
 
-const regla = reactive({ id: null, tipo: 'sin_reporte', nombre: '', dominio: null, minutos: 60, porcentaje: 20, zona: '', activa: true })
+const regla = reactive({ id: null, tipo: 'sin_reporte', nombre: '', dominio: null, minutos: 60, porcentaje: 20, zona: '', activa: true, avisar: '' })
 const editandoRegla = ref(false)
 const errorRegla = ref('')
 const confirmaRegla = ref(null)
@@ -186,7 +186,7 @@ watch(() => regla.dominio, () => {
 })
 
 function nuevaRegla() {
-  Object.assign(regla, { id: null, tipo: 'sin_reporte', nombre: '', dominio: dominioPorDefecto(), minutos: 60, porcentaje: 20, zona: '', activa: true })
+  Object.assign(regla, { id: null, tipo: 'sin_reporte', nombre: '', dominio: dominioPorDefecto(), minutos: 60, porcentaje: 20, zona: '', activa: true, avisar: '' })
   regla.zona = zonasRegla.value[0]?.id ?? ''
   editandoRegla.value = true
   errorRegla.value = ''
@@ -197,6 +197,7 @@ function editaRegla(r) {
   Object.assign(regla, {
     id: r.id, tipo: r.tipo, nombre: r.nombre, dominio: r.dominio ?? null,
     minutos: p.minutos ?? 60, porcentaje: p.porcentaje ?? 20, zona: p.zona ?? '', activa: r.activa,
+    avisar: (r.avisar || []).join(', '),
   })
   editandoRegla.value = true
   errorRegla.value = ''
@@ -220,6 +221,8 @@ async function guardaRegla() {
     ...(regla.dominio !== '' ? { dominio: regla.dominio } : {}),
     parametros: parametrosDe(regla),
     activa: regla.activa,
+    // Separados por coma, punto y coma, espacio o renglón.
+    avisar: regla.avisar.split(/[\s,;]+/).map((c) => c.trim()).filter(Boolean),
   }
   try {
     if (regla.id) await api.patch(`/v1/reglas/${regla.id}`, cuerpo)
@@ -340,6 +343,12 @@ function minutosLegibles(m) {
         </div>
       </div>
       <p class="apagado chico" style="margin: 10px 0 0">{{ tiposRegla[regla.tipo].explica }}</p>
+      <label>Avisar por correo a <span class="apagado">(opcional)</span></label>
+      <input v-model="regla.avisar" type="text" inputmode="email" autocomplete="off" placeholder="encargado@tu-empresa.com, otra@tu-empresa.com" />
+      <span class="apagado chico">
+        Cuando la regla abre una alerta les llega un correo, por el correo de salida de la
+        organización (Organización → Correo de salida). Por el mismo equipo, como mucho uno por hora.
+      </span>
       <label class="casilla" style="margin-top: 10px"><input type="checkbox" v-model="regla.activa" /> Activa</label>
       <p v-if="regla.id" class="apagado chico" style="margin: 6px 0 0">
         Al guardar, las alertas abiertas de esta regla se cierran y se vuelven a evaluar con lo nuevo.
@@ -361,6 +370,9 @@ function minutosLegibles(m) {
           <td data-t="Regla">
             <strong>{{ r.nombre || tiposRegla[r.tipo]?.nombre }}</strong>
             <div v-if="r.nombre && r.nombre !== tiposRegla[r.tipo]?.nombre" class="apagado chico">{{ tiposRegla[r.tipo]?.nombre }}</div>
+            <div v-if="r.avisar?.length" class="apagado chico" :title="r.avisar.join(', ')">
+              avisa por correo a {{ r.avisar.length === 1 ? r.avisar[0] : `${r.avisar.length} personas` }}
+            </div>
           </td>
           <td data-t="Vigila">{{ describe(r) }}</td>
           <td data-t="A quién">{{ r.dominio != null ? `los de ${r.dominio_nombre}` : 'todos los equipos' }}</td>

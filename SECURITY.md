@@ -58,6 +58,7 @@ administra el hub.
 | Sesiones del panel | JWT HS256 con `DT_SECRETO_JWT`, siete días. El rol se lee de la base en cada petición |
 | Secreto del webhook | En claro (hace falta para firmar). Se enseña una vez |
 | Clave del correo de salida | En claro (hace falta para autenticar ante el servidor SMTP). La API nunca la devuelve: el panel solo sabe si está puesta. Use una cuenta o una clave de aplicación solo para esto |
+| Clave del asistente de IA | En claro (hace falta para llamar al proveedor). Es de cada organización, con su propia cuenta; la API nunca la devuelve y viaja solo en la cabecera de la llamada al proveedor, nunca en la URL ni en un log |
 
 Las comparaciones van en tiempo constante. El log nunca lleva una llave ni un
 token. Los errores internos devuelven una referencia, no el texto de la
@@ -76,7 +77,5 @@ cabecera, no en la URL: una URL termina en el log de cualquier proxy.
 
 ## Lo que todavía no hace
 
-* No manda correos: las invitaciones son enlaces que se comparten a mano y las
-  alertas salen por webhook.
 * No tiene doble factor.
 * El webhook no reintenta.

@@ -1,6 +1,6 @@
 <script setup>
 import { ref, reactive, computed, onMounted } from 'vue'
-import { api, fecha } from '../api.js'
+import { api, fecha, explicaIa } from '../api.js'
 
 defineProps({ yo: Object })
 
@@ -83,6 +83,86 @@ async function quitaCorreo() {
   }
 }
 
+// El asistente de IA: las credenciales son de esta organización, con su
+// propia cuenta en el proveedor. La clave no vuelve del hub, igual que la del
+// correo.
+const ia = reactive({ proveedor: 'anthropic', modelo: '', clave: '', activo: true })
+const iaEstado = ref(null)
+const iaError = ref('')
+const iaListo = ref('')
+const iaGuardando = ref(false)
+const iaProbando = ref(false)
+const modelosIa = computed(() => iaEstado.value?.proveedores?.[ia.proveedor]?.modelos || [])
+const dondeClave = {
+  anthropic: 'https://console.anthropic.com/settings/keys',
+  gemini: 'https://aistudio.google.com/apikey',
+}
+
+function llenaIa(c) {
+  iaEstado.value = { ...iaEstado.value, ...c }
+  Object.assign(ia, {
+    proveedor: c.proveedor || ia.proveedor,
+    modelo: c.modelo || '',
+    clave: '',
+    activo: c.activo ?? true,
+  })
+  if (!ia.modelo) ia.modelo = modelosIa.value[0] || ''
+}
+
+function cambiaProveedor() {
+  // El modelo de un proveedor no existe en el otro.
+  ia.modelo = modelosIa.value[0] || ''
+}
+
+async function cargaIa() {
+  try {
+    llenaIa(await api.get('/v1/org/ia'))
+  } catch (e) {
+    iaError.value = e.message
+  }
+}
+
+async function guardaIa() {
+  iaError.value = ''
+  iaListo.value = ''
+  iaGuardando.value = true
+  try {
+    llenaIa(await api.put('/v1/org/ia', { ...ia, modelo: ia.modelo.trim() }))
+    iaListo.value = 'Guardado. Pulsa «Probar» para ver que contesta.'
+  } catch (e) {
+    iaError.value = e.message
+  } finally {
+    iaGuardando.value = false
+  }
+}
+
+async function pruebaIa() {
+  iaError.value = ''
+  iaListo.value = ''
+  iaProbando.value = true
+  try {
+    const r = await api.post('/v1/org/ia/prueba')
+    iaListo.value = `Funciona: ${r.modelo} contestó «${r.respuesta}».`
+  } catch (e) {
+    iaError.value = explicaIa(e)
+  } finally {
+    iaProbando.value = false
+  }
+}
+
+async function quitaIa() {
+  iaError.value = ''
+  iaListo.value = ''
+  try {
+    await api.put('/v1/org/ia', { quitar: true })
+    iaEstado.value = { ...iaEstado.value, configurado: false, disponible: false, clave_puesta: false }
+    ia.clave = ''
+    iaListo.value = 'Sin asistente: se borraron las credenciales.'
+  } catch (e) {
+    iaError.value = e.message
+  }
+}
+
 function llena(o) {
   org.value = o
   Object.assign(f, {
@@ -101,6 +181,7 @@ onMounted(async () => {
   } catch (e) {
     error.value = e.message
   }
+  cargaIa()
 })
 
 const cambios = computed(() => {
@@ -265,9 +346,11 @@ const intervaloTexto = computed(() => {
     <form v-if="org.correo" class="tarjeta" style="max-width: 680px; margin-top: 18px" @submit.prevent="guardaCorreo">
       <h3>Correo de salida</h3>
       <p class="apagado chico">
-        Con él salen las invitaciones al panel. device-track no usa el correo de ningún otro
-        sistema: pon una cuenta de tu organización (mejor una solo para esto, o una clave de
-        aplicación). Sin él, invitar es un enlace que compartes tú.
+        Con él salen las invitaciones al panel y los avisos de las reglas (Reglas y zonas →
+        «Avisar por correo a»). device-track no usa el correo de ningún otro sistema: pon una
+        cuenta de tu organización (mejor una solo para esto). En Gmail, la clave es una
+        <a href="https://myaccount.google.com/apppasswords" target="_blank" rel="noopener">contraseña de aplicación</a>,
+        no la de entrar. Sin él, invitar es un enlace que compartes tú.
       </p>
       <p class="chico" style="margin-top: 6px">
         {{ correoEstado.configurado ? `Configurado: sale como ${correoEstado.remitente}.` : 'Todavía no hay correo de salida.' }}
@@ -304,6 +387,64 @@ const intervaloTexto = computed(() => {
           {{ correoProbando ? 'Mandando…' : 'Mandarme un correo de prueba' }}
         </button>
         <button v-if="correoEstado.configurado" type="button" class="boton suave chico" @click="quitaCorreo">Quitar</button>
+      </div>
+    </form>
+
+    <form v-if="iaEstado" class="tarjeta" style="max-width: 680px; margin-top: 18px" @submit.prevent="guardaIa">
+      <h3>Asistente IA</h3>
+      <p class="apagado chico">
+        Con él, las personas de tu organización le preguntan al asistente por sus equipos, le piden
+        reglas y avisos, y arman sus tableros. Usa la cuenta de <strong>tu organización</strong> con el
+        proveedor, que te cobra a ti: device-track no trae una propia. El asistente ve y hace solo lo
+        que puede la persona que le pregunta.
+      </p>
+      <p class="chico" style="margin-top: 6px">
+        <template v-if="iaEstado.disponible">Encendido: {{ iaEstado.modelo }}.</template>
+        <template v-else-if="iaEstado.configurado">Configurado, pero apagado.</template>
+        <template v-else>Todavía no hay asistente.</template>
+        <span v-if="iaEstado.uso_30_dias?.llamadas" class="apagado">
+          · últimos 30 días: {{ iaEstado.uso_30_dias.llamadas }} llamadas,
+          {{ (iaEstado.uso_30_dias.entrada + iaEstado.uso_30_dias.salida).toLocaleString('es') }} tokens
+        </span>
+      </p>
+      <div class="rejilla-campos" style="margin-top: 10px">
+        <div>
+          <label>Proveedor</label>
+          <select v-model="ia.proveedor" @change="cambiaProveedor">
+            <option v-for="(p, id) in iaEstado.proveedores" :key="id" :value="id">{{ p.nombre }}</option>
+          </select>
+        </div>
+        <div>
+          <label>Modelo</label>
+          <input v-model="ia.modelo" list="modelos-ia" autocomplete="off" required />
+          <datalist id="modelos-ia">
+            <option v-for="m in modelosIa" :key="m" :value="m" />
+          </datalist>
+        </div>
+        <div>
+          <label>Clave de API</label>
+          <input
+            v-model="ia.clave"
+            type="password"
+            autocomplete="new-password"
+            :placeholder="iaEstado.clave_puesta && iaEstado.proveedor === ia.proveedor ? 'Puesta: vacía para no cambiarla' : ''"
+          />
+        </div>
+      </div>
+      <p class="apagado chico" style="margin: 6px 0 0">
+        La clave se saca en
+        <a :href="dondeClave[ia.proveedor]" target="_blank" rel="noopener">{{ dondeClave[ia.proveedor].replace('https://', '') }}</a>.
+        Se guarda en este hub y no se vuelve a mostrar.
+      </p>
+      <label class="casilla" style="margin-top: 12px"><input type="checkbox" v-model="ia.activo" /> Encendido</label>
+      <p v-if="iaError" class="aviso" style="margin-top: 10px">{{ iaError }}</p>
+      <p v-if="iaListo" class="exito chico" style="margin-top: 10px">{{ iaListo }}</p>
+      <div class="en-linea" style="flex-wrap: wrap; margin-top: 12px">
+        <button class="boton" :disabled="iaGuardando">{{ iaGuardando ? 'Guardando…' : 'Guardar' }}</button>
+        <button type="button" class="boton suave chico" :disabled="!iaEstado.configurado || iaProbando" @click="pruebaIa">
+          {{ iaProbando ? 'Probando…' : 'Probar' }}
+        </button>
+        <button v-if="iaEstado.configurado" type="button" class="boton suave chico" @click="quitaIa">Quitar</button>
       </div>
     </form>
   </template>

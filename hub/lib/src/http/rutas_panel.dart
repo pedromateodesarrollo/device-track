@@ -464,7 +464,7 @@ void registraRutasPanel(Servidor s, Canal canal, Ordenes ordenes, Alertas alerta
 
   s.ruta('GET', '/v1/reglas', (p) async {
     final r = await p.bd.filas(
-      '''select r.id, r.nombre, r.tipo, r.dominio, d.nombre as dominio_nombre, r.parametros, r.activa, r.creado,
+      '''select r.id, r.nombre, r.tipo, r.dominio, d.nombre as dominio_nombre, r.parametros, r.activa, r.avisar, r.creado,
                 (select count(*) from dt.alerta a join dt.equipo e on e.id = a.equipo
                   where a.regla = r.id and a.cerrada is null
                     and ${enDominios(p.s.dominios, 'e.dominio')}) as abiertas
@@ -481,8 +481,8 @@ void registraRutasPanel(Servidor s, Canal canal, Ordenes ordenes, Alertas alerta
     if (leida is Respuesta) return leida;
     final datos = leida as Map<String, Object?>;
     final r = await p.bd.fila(
-      '''insert into dt.regla (org, nombre, tipo, dominio, parametros, activa)
-         values (@o, @n, @t, @d, @pa, @a)
+      '''insert into dt.regla (org, nombre, tipo, dominio, parametros, activa, avisar)
+         values (@o, @n, @t, @d, @pa, @a, @av)
          returning $_columnasRegla''',
       {'o': p.s.org, ...datos},
     );
@@ -494,7 +494,7 @@ void registraRutasPanel(Servidor s, Canal canal, Ordenes ordenes, Alertas alerta
   s.ruta('PATCH', '/v1/reglas/:id', (p) async {
     final id = p.enteroParam('id');
     final actual = await p.bd.fila(
-      '''select nombre, tipo, dominio, parametros, activa from dt.regla
+      '''select nombre, tipo, dominio, parametros, activa, avisar from dt.regla
           where id = @i and org = @o and ${enDominios(p.s.dominios, 'dominio')}''',
       {'i': id, 'o': p.s.org},
     );
@@ -504,7 +504,7 @@ void registraRutasPanel(Servidor s, Canal canal, Ordenes ordenes, Alertas alerta
     if (leida is Respuesta) return leida;
     final nueva = leida as Map<String, Object?>;
     final r = await p.bd.fila(
-      '''update dt.regla set nombre = @n, dominio = @d, parametros = @pa, activa = @a
+      '''update dt.regla set nombre = @n, dominio = @d, parametros = @pa, activa = @a, avisar = @av
           where id = @i and org = @o
           returning $_columnasRegla''',
       {'i': id, 'o': p.s.org, ...nueva..remove('t')},
@@ -763,7 +763,7 @@ const _columnasZona = '''id, nombre, lat, lng, radio_m, dominio,
 
 const _columnasRegla = '''id, nombre, tipo, dominio,
     (select nombre from dt.dominio where id = dt.regla.dominio) as dominio_nombre,
-    parametros, activa, creado''';
+    parametros, activa, avisar, creado''';
 
 /// Lo que va en el QR de un código de alta.
 String textoQr(String urlPublica, String codigo) =>
@@ -851,12 +851,30 @@ Future<Object> _leeRegla(Peticion p, Map<String, Object?> cuerpo) async {
     default:
       parametros = const {};
   }
+  // A quién se le escribe cuando abre una alerta (migración 0006). Sale por
+  // el correo de salida de la organización; sin él, la lista espera.
+  final avisar = <String>[];
+  final crudo = cuerpo['avisar'];
+  if (crudo != null && crudo is! List) {
+    return Respuesta.falla(400, 'avisar_invalido', 'avisar es una lista de correos');
+  }
+  for (final c in (crudo as List?) ?? const []) {
+    final correo = '$c'.trim().toLowerCase();
+    if (!RegExp(r'^[^@\s,;<>]+@[^@\s,;<>]+\.[^@\s,;<>]+$').hasMatch(correo)) {
+      return Respuesta.falla(400, 'avisar_invalido', '«$c» no es una dirección de correo');
+    }
+    if (!avisar.contains(correo)) avisar.add(correo);
+  }
+  if (avisar.length > 20) {
+    return Respuesta.falla(400, 'avisar_invalido', 'Hasta 20 correos por regla');
+  }
   return {
     'n': texto('nombre'),
     't': tipo,
     'd': dominio,
     'pa': parametros,
     'a': cuerpo['activa'] is bool ? cuerpo['activa'] : true,
+    'av': avisar,
   };
 }
 
