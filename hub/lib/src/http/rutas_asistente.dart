@@ -1,10 +1,13 @@
 import 'dart:convert';
 import 'dart:io';
+import 'dart:typed_data';
 
 import '../correo.dart';
 import '../ia/asistente.dart';
 import '../ia/config.dart';
 import '../ia/proveedor.dart';
+import '../ia/uso.dart';
+import '../ia/voz.dart';
 import '../log.dart';
 import 'servidor.dart';
 
@@ -34,6 +37,8 @@ void registraRutasAsistente(Servidor s, {Uri? base}) {
       return Respuesta.falla(400, 'falta_mensaje', 'Escribe la pregunta (hasta 8000 letras)');
     }
     final desfase = (p.entero('desfase_min') ?? 0).clamp(-14 * 60, 14 * 60);
+    // Llegó por nota de voz: el modelo contesta para el oído (voz.dart).
+    final voz = p.cuerpo['voz'] == true;
 
     // La conversación: la que dice, si es suya y del mismo modelo; si no, una
     // nueva. Lo que pensó un modelo no le sirve a otro.
@@ -85,7 +90,7 @@ void registraRutasAsistente(Servidor s, {Uri? base}) {
       correoDeSalida: ConfigCorreo.deJson(yo['correo_org'])?.completa ?? false,
     );
     final pendientes = [for (final x in (conv['pendientes'] as List?) ?? const []) (x as Map).cast<String, Object?>()];
-    final texto = '${contextoDePregunta(ahoraUtc: DateTime.now().toUtc(), desfaseMin: desfase, pendientes: pendientes)}\n$mensaje';
+    final texto = '${contextoDePregunta(ahoraUtc: DateTime.now().toUtc(), desfaseMin: desfase, pendientes: pendientes)}${voz ? '\n$avisoDeVoz' : ''}\n$mensaje';
 
     // Desde aquí, NDJSON. nginx no debe juntar las líneas.
     final res = p.crudo!.response
@@ -120,7 +125,7 @@ void registraRutasAsistente(Servidor s, {Uri? base}) {
       );
       final ahora = DateTime.now().toUtc().toIso8601String();
       final vista = [
-        {'rol': 'persona', 'texto': mensaje, 't': ahora},
+        {'rol': 'persona', 'texto': mensaje, 't': ahora, if (voz) 'voz': true},
         {
           'rol': 'asistente',
           'texto': r.texto,
@@ -243,5 +248,76 @@ void registraRutasAsistente(Servidor s, {Uri? base}) {
     if (error != null) return error;
     await anota(p, pr!, 'descartada', null);
     return Respuesta.ok({'id': pr['id'], 'estado': 'descartada'});
+  }, acceso: Acceso.persona);
+  // ── La voz (ia/voz.dart): solo con Gemini ──
+
+  Future<(ConfigIa?, Respuesta?)> configVoz(Peticion p) async {
+    final c = await config(p);
+    if (c == null) return (null, sinIa());
+    if (!tieneVoz(c)) {
+      return (null, Respuesta.falla(409, 'ia_sin_voz',
+          'El asistente de esta organización no oye ni habla: la voz solo funciona con Google (Gemini)'));
+    }
+    return (c, null);
+  }
+
+  Future<void> apunta(Peticion p, ConfigIa c, String origen, String modelo, IaUso uso) => registraUso(
+    p.bd,
+    org: p.s.org,
+    usuario: p.s.usuario,
+    origen: origen,
+    proveedor: c.proveedor,
+    modelo: modelo,
+    uso: uso,
+  );
+
+  // `{audio (base64), mime}` → `{texto}`.
+  s.ruta('POST', '/v1/ia/voz/transcribir', (p) async {
+    final (c, falla) = await configVoz(p);
+    if (falla != null) return falla;
+    final tipo = mimeAudio(p.texto('mime'));
+    if (tipo == null) return Respuesta.falla(400, 'audio_invalido', 'Ese formato de audio no se sabe oír');
+    var b64 = p.texto('audio');
+    final coma = b64.startsWith('data:') ? b64.indexOf(',') : -1;
+    if (coma >= 0) b64 = b64.substring(coma + 1);
+    final List<int> bytes;
+    try {
+      bytes = base64Decode(b64);
+    } on FormatException {
+      return Respuesta.falla(400, 'audio_invalido', 'El audio no viene en base64');
+    }
+    if (bytes.length > vozMaxBytes) {
+      return Respuesta.falla(413, 'audio_largo', 'La nota de voz es muy larga: graba una más corta');
+    }
+    // Menos de ~1 KB no alcanza ni para medio segundo: se soltó el botón.
+    if (bytes.length < 1024) return Respuesta.falla(400, 'audio_invalido', 'La nota de voz está vacía');
+    try {
+      final t = await VozGemini(c!, base: base).transcribir(Uint8List.fromList(bytes), tipo);
+      await apunta(p, c, 'voz.transcribir', modeloOido, t.uso);
+      if (t.texto.isEmpty) return Respuesta.falla(422, 'no_se_entendio', 'No se entendió la nota de voz: grábala otra vez');
+      return Respuesta.ok({'texto': t.texto});
+    } on IaError catch (e) {
+      return Respuesta.falla(502, e.codigo, e.detalle);
+    }
+  }, acceso: Acceso.persona);
+
+  // `{texto (la respuesta como se pinta), parte}` → `{audio (WAV en base64),
+  // mime, parte, partes}`. La pantalla pide la siguiente mientras suena esta.
+  s.ruta('POST', '/v1/ia/voz/hablar', (p) async {
+    final (c, falla) = await configVoz(p);
+    if (falla != null) return falla;
+    final texto = p.texto('texto');
+    if (texto.length > 20000) return Respuesta.falla(400, 'texto_largo', 'El texto es demasiado largo');
+    final partes = partesDeVoz(textoParaVoz(texto));
+    if (partes.isEmpty) return Respuesta.falla(400, 'falta_texto', 'No hay nada que decir');
+    final i = p.entero('parte') ?? 0;
+    if (i < 0 || i >= partes.length) return Respuesta.falla(400, 'parte_invalida', 'Esa parte no existe');
+    try {
+      final a = await VozGemini(c!, base: base).hablar(partes[i]);
+      await apunta(p, c, 'voz.hablar', modeloVoz, a.uso);
+      return Respuesta.ok({'audio': base64Encode(a.wav), 'mime': 'audio/wav', 'parte': i, 'partes': partes.length});
+    } on IaError catch (e) {
+      return Respuesta.falla(502, e.codigo, e.detalle);
+    }
   }, acceso: Acceso.persona);
 }

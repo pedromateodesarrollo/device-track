@@ -61,4 +61,11 @@ void main() {
     expect(yo.alcanza(9), isTrue);
     expect(yo.ia, isTrue);
   });
+
+  test('la voz del asistente solo con el asistente encendido', () {
+    expect(_yo('editor').iaVoz, isFalse);
+    expect(Yo.deJson({'id': 1, 'rol': 'editor', 'ia': true, 'ia_voz': true}).iaVoz, isTrue);
+    expect(Yo.deJson({'id': 1, 'rol': 'editor', 'ia': false, 'ia_voz': true}).iaVoz, isFalse);
+    expect(Yo.deJson({'id': 1, 'rol': 'editor', 'ia': true, 'ia_voz': true}).conIa(false).iaVoz, isFalse);
+  });
 }

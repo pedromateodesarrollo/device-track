@@ -948,13 +948,13 @@ void main() {
   });
 
   /// Una pregunta al chat: las líneas NDJSON, ya decodificadas.
-  Future<List<Map<String, dynamic>>> chat(String mensaje, {int? conversacion, required String token}) async {
+  Future<List<Map<String, dynamic>>> chat(String mensaje, {int? conversacion, required String token, bool voz = false}) async {
     final c = HttpClient();
     try {
       final r = await c.openUrl('POST', Uri.parse('$base/v1/ia/chat'));
       r.headers.set('authorization', 'Bearer $token');
       r.headers.contentType = ContentType.json;
-      r.write(jsonEncode({'mensaje': mensaje, 'conversacion': ?conversacion, 'desfase_min': -240}));
+      r.write(jsonEncode({'mensaje': mensaje, 'conversacion': ?conversacion, 'desfase_min': -240, if (voz) 'voz': true}));
       final res = await r.close();
       final texto = await utf8.decodeStream(res);
       if (res.statusCode != 200) return [Map<String, dynamic>.from(jsonDecode(texto) as Map)..['_estado'] = res.statusCode];
@@ -1088,6 +1088,91 @@ void main() {
     (st, d) = await pide('PUT', '/v1/org/ia', json: {'quitar': true}, token: admin);
     final sin = await chat('Hola', token: admin);
     expect(sin.single['error'], 'ia_no_disponible');
+  });
+
+  test('voz: solo con Gemini; la nota se escribe, la pregunta por voz se contesta para el oído y se dice', () async {
+    // Con Anthropic no hay voz.
+    var (st, d) = await pide('PUT', '/v1/org/ia',
+        json: {'proveedor': 'anthropic', 'modelo': 'claude-opus-5-5', 'clave': 'sk-ant-voz'}, token: admin);
+    expect(d['voz'], isFalse);
+    (st, d) = await pide('GET', '/v1/yo', token: consulta);
+    expect(d['ia'], isTrue);
+    expect(d['ia_voz'], isFalse);
+    final nota = base64Encode(List.filled(2048, 1));
+    (st, d) = await pide('POST', '/v1/ia/voz/transcribir', json: {'audio': nota, 'mime': 'audio/webm'}, token: consulta);
+    expect(st, 409);
+    expect(d['error'], 'ia_sin_voz');
+
+    (st, d) = await pide('PUT', '/v1/org/ia',
+        json: {'proveedor': 'gemini', 'modelo': 'gemini-3.8-flash', 'clave': 'AIza-voz'}, token: admin);
+    expect(d['voz'], isTrue);
+    (st, d) = await pide('GET', '/v1/yo', token: consulta);
+    expect(d['ia_voz'], isTrue);
+
+    // La nota: formato, tamaño, y lo que se entendió.
+    (st, d) = await pide('POST', '/v1/ia/voz/transcribir', json: {'audio': nota, 'mime': 'video/mp4'}, token: consulta);
+    expect(d['error'], 'audio_invalido');
+    (st, d) = await pide('POST', '/v1/ia/voz/transcribir',
+        json: {'audio': base64Encode(List.filled(1500 * 1024, 1)), 'mime': 'audio/webm'}, token: consulta);
+    expect(st, 413);
+    ia.peticiones.clear();
+    ia.respuestas.add((200, IaFalso.geminiTexto('{"texto": "¿Cuántos equipos hay?"}')));
+    (st, d) = await pide('POST', '/v1/ia/voz/transcribir',
+        json: {'audio': nota, 'mime': 'audio/webm;codecs=opus'}, token: consulta);
+    expect(st, 200, reason: '$d');
+    expect(d['texto'], '¿Cuántos equipos hay?');
+    expect(ia.peticiones.single.ruta, contains('gemini-3.8-flash:generateContent'));
+
+    // La pregunta por voz lleva el aviso; la vista guarda que fue por voz.
+    ia.peticiones.clear();
+    ia.respuestas.add((200, IaFalso.geminiTexto('Hay dos equipos.')));
+    final ev = await chat('¿Cuántos equipos hay?', token: consulta, voz: true);
+    expect(ev.last['tipo'], 'fin', reason: '$ev');
+    final pregunta = jsonEncode(ia.peticiones.single.cuerpo['contents']);
+    expect(pregunta, contains('llegó por nota de voz'));
+    (st, d) = await pide('GET', '/v1/ia/conversaciones/${ev.last['conversacion']}', token: consulta);
+    expect((d['vista'] as List).first['voz'], isTrue);
+
+    // Escrita, sin el aviso.
+    ia.peticiones.clear();
+    ia.respuestas.add((200, IaFalso.geminiTexto('Hay dos.')));
+    await chat('¿Y ahora?', token: consulta);
+    expect(jsonEncode(ia.peticiones.single.cuerpo['contents']), isNot(contains('llegó por nota de voz')));
+
+    // La respuesta, dicha por partes con el modelo de voz.
+    ia.peticiones.clear();
+    ia.respuestas.add((
+      200,
+      {
+        'candidates': [
+          {
+            'content': {
+              'parts': [
+                {
+                  'inlineData': {'mimeType': 'audio/L16;codec=pcm;rate=24000', 'data': base64Encode(List.filled(100, 0))},
+                },
+              ],
+            },
+          },
+        ],
+      },
+    ));
+    (st, d) = await pide('POST', '/v1/ia/voz/hablar',
+        json: {'texto': 'Hay **dos** equipos. El otro está apagado desde ayer.', 'parte': 0}, token: consulta);
+    expect(st, 200, reason: '$d');
+    expect(d['partes'], 2);
+    expect(d['mime'], 'audio/wav');
+    expect(base64Decode(d['audio'] as String).length, 144);
+    expect(ia.peticiones.single.ruta, contains('gemini-3.8-flash-tts:generateContent'));
+    expect(ia.peticiones.single.cuerpo['contents'][0]['parts'][0]['text'], 'Hay dos equipos.');
+    (st, d) = await pide('POST', '/v1/ia/voz/hablar', json: {'texto': 'Hola.', 'parte': 3}, token: consulta);
+    expect(d['error'], 'parte_invalida');
+
+    final uso = await hub.bd.filas("select origen, modelo from dt.ia_uso where org = @o and origen like 'voz.%' order by id", {'o': org});
+    expect(uso.map((u) => u['origen']), containsAll(['voz.transcribir', 'voz.hablar']));
+    expect(uso.map((u) => u['modelo']), contains('gemini-3.8-flash-tts'));
+
+    (st, d) = await pide('PUT', '/v1/org/ia', json: {'quitar': true}, token: admin);
   });
 
   test('tableros: el Resumen de siempre, uno propio con IA, compartido y sus datos', () async {

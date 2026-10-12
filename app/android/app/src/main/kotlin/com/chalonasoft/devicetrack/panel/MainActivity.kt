@@ -16,8 +16,13 @@ import io.flutter.plugin.common.MethodChannel
  * cada cosa serían tres dependencias más que mantener.
  */
 class MainActivity : FlutterActivity() {
+    /** La voz del asistente: grabar la nota y tocar la respuesta (Voz.kt). */
+    private val voz by lazy { Voz(this) }
+
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
+        MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "device_track_panel/voz")
+            .setMethodCallHandler { llamada, resultado -> voz.atiende(llamada, resultado) }
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "device_track_panel/sistema")
             .setMethodCallHandler { llamada, resultado ->
                 when (llamada.method) {
@@ -34,6 +39,17 @@ class MainActivity : FlutterActivity() {
                     else -> resultado.notImplemented()
                 }
             }
+    }
+
+    override fun onRequestPermissionsResult(codigo: Int, permisos: Array<out String>, concedidos: IntArray) {
+        super.onRequestPermissionsResult(codigo, permisos, concedidos)
+        voz.permisoRespondido(codigo, concedidos)
+    }
+
+    override fun onStop() {
+        // Con la app en el fondo no se graba ni se habla.
+        voz.suelta()
+        super.onStop()
     }
 
     private fun version(): Map<String, Any?> {

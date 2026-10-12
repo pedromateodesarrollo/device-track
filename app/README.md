@@ -6,6 +6,12 @@ asistente de IA, el mapa, las reglas, las personas y la cuenta. Es una app
 nativa en Flutter que habla con el mismo API que el panel web
 ([docs/api.md](../docs/api.md)); no envuelve la web.
 
+Con el asistente de Gemini, el botón del micrófono (con el campo vacío) manda
+la pregunta como nota de voz y la respuesta se oye. Grabar y tocar los hace
+Android (`MediaRecorder` y `MediaPlayer`, en `Voz.kt` por el canal
+`device_track_panel/voz`), sin paquetes de más; el permiso del micrófono se
+pide la primera vez que se toca.
+
 Se entra con el correo y la clave del panel. La dirección del hub viene puesta
 (`https://devicetrack.chalonasoft.com`) y se puede cambiar: device-track se
 puede hospedar en cualquier parte.

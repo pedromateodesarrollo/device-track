@@ -2,6 +2,9 @@
     <!-- Hablar con el hub. Lo de apk-server (instalar, notificar que hay
          versión) lo trae su biblioteca y se funde aquí solo. -->
     <uses-permission android:name="android.permission.INTERNET" />
+    <!-- La nota de voz para el asistente (Voz.kt). Se pide al tocar el
+         micrófono, no al abrir la app. -->
+    <uses-permission android:name="android.permission.RECORD_AUDIO" />
 
     <application
         android:label="device-track panel"

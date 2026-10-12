@@ -307,6 +307,7 @@ class MensajeChat {
     List<Propuesta>? propuestas,
     List<String>? notas,
     this.t,
+    this.voz = false,
   }) : herramientas = herramientas ?? [],
        propuestas = propuestas ?? [],
        notas = notas ?? [];
@@ -320,6 +321,9 @@ class MensajeChat {
   /// guarda en la conversación.
   final List<String> notas;
   final Object? t;
+
+  /// La pregunta llegó por nota de voz.
+  final bool voz;
 }
 
 class Conversacion {
@@ -346,6 +350,7 @@ class Conversacion {
               deLaPersona: v['rol'] == 'persona',
               texto: '${v['texto'] ?? ''}',
               t: v['t'],
+              voz: v['voz'] == true,
               herramientas: [
                 for (final h in (v['herramientas'] as List?) ?? const [])
                   if (h is Map)

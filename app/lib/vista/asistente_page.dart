@@ -3,6 +3,11 @@
 /// mientras el hub consulta: se ve qué está mirando. Lo que el asistente
 /// propone cambiar sale como tarjeta con «Confirmar» y «Descartar»: nada
 /// cambia hasta que la persona confirma.
+///
+/// La voz (`voz.dart`): si la organización la tiene (`yo.iaVoz`), con el
+/// campo vacío el botón es un micrófono: la pregunta va por nota de voz y la
+/// respuesta se oye. Lo escrito se contesta solo escrito; «Escuchar» lee
+/// cualquier respuesta.
 library;
 
 import 'dart:async';
@@ -17,6 +22,7 @@ import '../navegacion.dart';
 import '../sesion.dart';
 import '../sistema.dart';
 import '../tema.dart';
+import '../voz.dart';
 import 'comun.dart';
 import 'markdown.dart';
 
@@ -45,6 +51,15 @@ class _AsistentePageState extends State<AsistentePage> {
   /// El error fue `conversacion_larga`: se ofrece empezar otra.
   bool _larga = false;
 
+  // La nota de voz.
+  bool get _conVoz => sesion.yo?.iaVoz ?? false;
+  late final _locutor = Locutor(sesion.api)..addListener(_alHablar);
+  bool _grabando = false;
+  bool _escribiendoNota = false;
+  int _segundosNota = 0;
+  Timer? _reloj;
+  DateTime _inicioNota = DateTime.now();
+
   static const _sugerencias = [
     '¿Qué equipos llevan más de un día sin reportar?',
     '¿Cuáles tienen la batería por debajo de 20 % ahora?',
@@ -63,6 +78,12 @@ class _AsistentePageState extends State<AsistentePage> {
   @override
   void dispose() {
     navegacion.preguntaAsistente.removeListener(_tomaPregunta);
+    _reloj?.cancel();
+    if (_grabando) cancelaNota();
+    _locutor
+      ..removeListener(_alHablar)
+      ..callar()
+      ..dispose();
     _texto.dispose();
     _foco.dispose();
     _desplaza.dispose();
@@ -159,10 +180,72 @@ class _AsistentePageState extends State<AsistentePage> {
     });
   }
 
-  Future<void> _envia([String? pregunta]) async {
+  void _alHablar() {
+    if (mounted) setState(() {});
+  }
+
+  // ── La nota de voz ──
+
+  Future<void> _empiezaNota() async {
+    if (_enviando || _grabando || _escribiendoNota) return;
+    setState(() => _error = null);
+    await _locutor.callar();
+    try {
+      await empiezaNota();
+    } on VozError catch (e) {
+      if (mounted) setState(() => _error = e.mensaje);
+      return;
+    }
+    if (!mounted) {
+      cancelaNota();
+      return;
+    }
+    _inicioNota = DateTime.now();
+    setState(() {
+      _grabando = true;
+      _segundosNota = 0;
+    });
+    _reloj = Timer.periodic(const Duration(milliseconds: 250), (_) {
+      final s = DateTime.now().difference(_inicioNota).inSeconds;
+      if (s != _segundosNota && mounted) setState(() => _segundosNota = s);
+      if (s >= maxSegundosNota) _terminaNota();
+    });
+  }
+
+  void _cancelaNota() {
+    _reloj?.cancel();
+    cancelaNota();
+    setState(() => _grabando = false);
+  }
+
+  Future<void> _terminaNota() async {
+    if (!_grabando) return;
+    _reloj?.cancel();
+    setState(() {
+      _grabando = false;
+      _escribiendoNota = true;
+    });
+    var dicho = '';
+    try {
+      final nota = await terminaNota();
+      if (nota == null) {
+        _error = 'No se grabó nada: mantén el micrófono abierto mientras hablas.';
+      } else {
+        dicho = await transcribe(sesion.api, nota);
+      }
+    } on HubError catch (e) {
+      _error = explicaIa(e.codigo, e.mensaje);
+    } finally {
+      if (mounted) setState(() => _escribiendoNota = false);
+    }
+    if (dicho.isNotEmpty && mounted) _envia(dicho, true);
+  }
+
+  Future<void> _envia([String? pregunta, bool voz = false]) async {
     final mensaje = (pregunta ?? _texto.text).trim();
     if (mensaje.isEmpty || _enviando) return;
-    final persona = MensajeChat(deLaPersona: true, texto: mensaje);
+    _locutor.callar();
+    final persona = MensajeChat(deLaPersona: true, texto: mensaje, voz: voz);
     final respuesta = MensajeChat(deLaPersona: false);
     setState(() {
       _error = null;
@@ -188,6 +271,7 @@ class _AsistentePageState extends State<AsistentePage> {
         'mensaje': mensaje,
         'conversacion': ?_actual,
         'desfase_min': DateTime.now().timeZoneOffset.inMinutes,
+        if (voz) 'voz': true,
       });
       await for (final e in eventos) {
         if (!mounted) return;
@@ -235,6 +319,10 @@ class _AsistentePageState extends State<AsistentePage> {
         _cargaLista();
         _baja();
       }
+    }
+    // Lo que se preguntó con la voz se contesta en voz.
+    if (voz && mounted && respuesta.texto.isNotEmpty && _mensajes.contains(respuesta)) {
+      _locutor.decir(respuesta, respuesta.texto);
     }
   }
 
@@ -319,6 +407,11 @@ class _AsistentePageState extends State<AsistentePage> {
                     itemBuilder: (_, i) => _burbuja(_mensajes[i], ultimo: i == _mensajes.length - 1),
                   ),
           ),
+          if (_locutor.error != null && _error == null)
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 4, 16, 0),
+              child: Aviso(_locutor.error!),
+            ),
           if (_error != null)
             Padding(
               padding: const EdgeInsets.fromLTRB(16, 4, 16, 0),
@@ -362,33 +455,76 @@ class _AsistentePageState extends State<AsistentePage> {
     top: false,
     child: Padding(
       padding: const EdgeInsets.fromLTRB(12, 8, 8, 8),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.end,
-        children: [
-          Expanded(
-            child: TextField(
-              controller: _texto,
-              focusNode: _foco,
-              enabled: !_enviando,
-              minLines: 1,
-              maxLines: 6,
-              maxLength: 8000,
-              textCapitalization: TextCapitalization.sentences,
-              decoration: const InputDecoration(hintText: 'Escribe tu pregunta…', counterText: ''),
+      child: _grabando
+          ? _grabandoNota()
+          : _escribiendoNota
+          ? Padding(
+              padding: const EdgeInsets.symmetric(vertical: 12),
+              child: Row(
+                children: [
+                  const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2)),
+                  const SizedBox(width: 10),
+                  Text('Escribiendo lo que dijiste…', style: apagado(context)),
+                ],
+              ),
+            )
+          : Row(
+              crossAxisAlignment: CrossAxisAlignment.end,
+              children: [
+                Expanded(
+                  child: TextField(
+                    controller: _texto,
+                    focusNode: _foco,
+                    enabled: !_enviando,
+                    minLines: 1,
+                    maxLines: 6,
+                    maxLength: 8000,
+                    textCapitalization: TextCapitalization.sentences,
+                    decoration: InputDecoration(
+                      hintText: _conVoz ? 'Escribe o toca el micrófono…' : 'Escribe tu pregunta…',
+                      counterText: '',
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 6),
+                // Con el campo vacío y voz, el botón es el micrófono.
+                ValueListenableBuilder(
+                  valueListenable: _texto,
+                  builder: (_, v, _) => _conVoz && v.text.trim().isEmpty && !_enviando
+                      ? IconButton.filled(
+                          tooltip: 'Preguntar con una nota de voz',
+                          onPressed: _empiezaNota,
+                          icon: const Icon(Icons.mic),
+                        )
+                      : IconButton.filled(
+                          tooltip: 'Enviar',
+                          onPressed: _enviando ? null : _envia,
+                          icon: _enviando
+                              ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2))
+                              : const Icon(Icons.send),
+                        ),
+                ),
+              ],
             ),
-          ),
-          const SizedBox(width: 6),
-          IconButton.filled(
-            tooltip: 'Enviar',
-            onPressed: _enviando ? null : _envia,
-            icon: _enviando
-                ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2))
-                : const Icon(Icons.send),
-          ),
-        ],
-      ),
     ),
   );
+
+  Widget _grabandoNota() {
+    final p = Paleta.de(context);
+    return Row(
+      children: [
+        const SizedBox(width: 4),
+        Icon(Icons.fiber_manual_record, color: p.mal, size: 16),
+        const SizedBox(width: 6),
+        Text(duracion(_segundosNota), style: const TextStyle(fontFeatures: [FontFeature.tabularFigures()])),
+        Text(' / ${duracion(maxSegundosNota)}', style: apagado(context, tamano: 12)),
+        const SizedBox(width: 10),
+        Expanded(child: Text('Habla…', style: apagado(context), overflow: TextOverflow.ellipsis)),
+        IconButton(tooltip: 'Cancelar la nota', onPressed: _cancelaNota, icon: const Icon(Icons.close)),
+        IconButton.filled(tooltip: 'Enviar la nota', onPressed: _terminaNota, icon: const Icon(Icons.send)),
+      ],
+    );
+  }
 
   Widget _burbuja(MensajeChat m, {required bool ultimo}) {
     final p = Paleta.de(context);
@@ -401,7 +537,19 @@ class _AsistentePageState extends State<AsistentePage> {
           margin: const EdgeInsets.only(bottom: 10, left: 32),
           padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
           decoration: BoxDecoration(color: p.marca, borderRadius: BorderRadius.circular(14)),
-          child: SelectableText(m.texto, style: const TextStyle(color: Colors.white)),
+          child: m.voz
+              ? Row(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Padding(
+                      padding: EdgeInsets.only(top: 2, right: 6),
+                      child: Icon(Icons.mic, size: 16, color: Colors.white70),
+                    ),
+                    Flexible(child: SelectableText(m.texto, style: const TextStyle(color: Colors.white))),
+                  ],
+                )
+              : SelectableText(m.texto, style: const TextStyle(color: Colors.white)),
         ),
       );
     }
@@ -441,9 +589,25 @@ class _AsistentePageState extends State<AsistentePage> {
               ),
             ],
             if (m.texto.isNotEmpty) SelectionArea(child: MarkdownVista(m.texto, alEnlace: _enlace)),
+            if (_conVoz && m.texto.isNotEmpty && !escribiendo) _escuchar(m),
             for (final pr in m.propuestas) _TarjetaPropuesta(pr, alCambiar: () => setState(() {})),
           ],
         ),
+      ),
+    );
+  }
+
+  Widget _escuchar(MensajeChat m) {
+    final suena = identical(_locutor.sonando, m);
+    return Padding(
+      padding: const EdgeInsets.only(top: 4),
+      child: TextButton.icon(
+        style: TextButton.styleFrom(visualDensity: VisualDensity.compact, padding: const EdgeInsets.symmetric(horizontal: 8)),
+        onPressed: () => suena ? _locutor.callar() : _locutor.decir(m, m.texto),
+        icon: suena && _locutor.cargando
+            ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2))
+            : Icon(suena ? Icons.stop_circle_outlined : Icons.volume_up_outlined, size: 18),
+        label: Text(suena ? (_locutor.cargando ? 'Preparando la voz…' : 'Callar') : 'Escuchar'),
       ),
     );
   }

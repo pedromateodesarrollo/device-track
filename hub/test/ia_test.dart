@@ -1,8 +1,10 @@
 import 'dart:convert';
+import 'dart:typed_data';
 
 import 'package:device_track_hub/src/alertas.dart';
 import 'package:device_track_hub/src/ia/config.dart';
 import 'package:device_track_hub/src/ia/proveedor.dart';
+import 'package:device_track_hub/src/ia/voz.dart';
 import 'package:test/test.dart';
 
 import 'ia_falso.dart';
@@ -239,5 +241,103 @@ void main() {
     expect(detalleDeAlerta('bateria_baja', {'bateria': 9, 'porcentaje': 15}), '9 % (umbral 15 %)');
     expect(detalleDeAlerta('fuera_de_zona', {'zona': 'A13', 'distancia_m': 1530, 'radio_m': 200}),
         'a 1,5 km de A13 (radio 200 m)');
+  });
+  group('voz', () {
+    const gemini = ConfigIa(proveedor: 'gemini', modelo: 'gemini-3.8-flash', clave: 'AIza-prueba');
+
+    test('solo Gemini, con el asistente encendido', () {
+      expect(tieneVoz(gemini), isTrue);
+      expect(tieneVoz(const ConfigIa(proveedor: 'gemini', modelo: 'gemini-3.8-flash', clave: 'x', activo: false)), isFalse);
+      expect(tieneVoz(const ConfigIa(proveedor: 'anthropic', modelo: 'claude-opus-5-5', clave: 'x')), isFalse);
+      expect(tieneVoz(null), isFalse);
+      expect(gemini.publico()['voz'], isTrue);
+    });
+
+    test('formatos de audio', () {
+      expect(mimeAudio('audio/webm;codecs=opus'), 'audio/webm');
+      expect(mimeAudio('audio/x-m4a'), 'audio/mp4');
+      expect(mimeAudio('video/mp4'), isNull);
+    });
+
+    test('lo que se dice no es el Markdown', () {
+      final t = textoParaVoz('''
+## Equipos sin reportar
+Hay **3** terminales sin reportar desde ayer.
+
+| Equipo | Última vez |
+|---|---|
+| TC56-01 | ayer |
+
+- Revisa la [TC56-01](https://x/equipos/1)
+''');
+      expect(t, 'Equipos sin reportar. Hay 3 terminales sin reportar desde ayer. '
+          'El detalle está en la tabla de la pantalla. Revisa la TC56-01.');
+    });
+
+    test('la primera parte es una oración corta; lo largo se corta', () {
+      final largo = List.filled(100, 'Esta es una oración de relleno para la prueba.').join(' ');
+      final partes = partesDeVoz('Hay tres equipos sin reportar. $largo');
+      expect(partes.first, 'Hay tres equipos sin reportar.');
+      expect(partes.skip(1).every((p) => p.length <= 550), isTrue);
+      expect(partes.last, 'El resto está en la pantalla.');
+      expect(partesDeVoz('Hay tres equipos sin reportar. $largo'), partes); // siempre el mismo corte
+      expect(partesDeVoz('  '), isEmpty);
+    });
+
+    test('transcribir: el modelo que oye, sin razonar, y el texto del JSON', () async {
+      falso.respuestas.add((200, IaFalso.geminiTexto('{"texto": "¿Qué equipos no reportan?"}')));
+      final t = await VozGemini(gemini, base: falso.base).transcribir(Uint8List.fromList([1, 2, 3]), 'audio/webm');
+      expect(t.texto, '¿Qué equipos no reportan?');
+      final pet = falso.peticiones.single;
+      expect(pet.ruta, '/v1beta/models/gemini-3.8-flash:generateContent');
+      expect(pet.cabeceras['x-goog-api-key'], 'AIza-prueba');
+      expect(pet.cuerpo['generationConfig']['thinkingConfig'], {'thinkingBudget': 0});
+      final audio = pet.cuerpo['contents'][0]['parts'][0]['inlineData'] as Map;
+      expect(audio, {'mimeType': 'audio/webm', 'data': base64Encode([1, 2, 3])});
+    });
+
+    test('hablar: solo el texto al modelo de voz, y el PCM vuelve como WAV', () async {
+      final pcm = List.filled(480, 7);
+      falso.respuestas.add((
+        200,
+        {
+          'candidates': [
+            {
+              'content': {
+                'role': 'model',
+                'parts': [
+                  {
+                    'inlineData': {'mimeType': 'audio/L16;codec=pcm;rate=24000', 'data': base64Encode(pcm)},
+                  },
+                ],
+              },
+              'finishReason': 'STOP',
+            },
+          ],
+          'usageMetadata': {'promptTokenCount': 8, 'candidatesTokenCount': 120},
+        },
+      ));
+      final a = await VozGemini(gemini, base: falso.base).hablar('Hay tres equipos sin reportar.');
+      final pet = falso.peticiones.single;
+      expect(pet.ruta, '/v1beta/models/gemini-3.8-flash-tts:generateContent');
+      expect(pet.cuerpo.containsKey('systemInstruction'), isFalse);
+      expect(pet.cuerpo['contents'][0]['parts'], [
+        {'text': 'Hay tres equipos sin reportar.'},
+      ]);
+      expect(String.fromCharCodes(a.wav.sublist(0, 4)), 'RIFF');
+      expect(a.wav.length, 44 + pcm.length);
+      expect(a.uso.salida, 120);
+    });
+
+    test('hablar: sin audio dos veces, es un error', () async {
+      falso.respuestas
+        ..add((200, IaFalso.geminiTexto('nada')))
+        ..add((200, IaFalso.geminiTexto('nada')));
+      await expectLater(
+        VozGemini(gemini, base: falso.base).hablar('Hola.'),
+        throwsA(isA<IaError>().having((e) => e.codigo, 'codigo', 'ia_respuesta_rara')),
+      );
+      expect(falso.peticiones, hasLength(2));
+    });
   });
 }

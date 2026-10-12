@@ -35,6 +35,7 @@ class Yo {
     required this.organizacion,
     this.dominios = const [],
     this.ia = false,
+    this.iaVoz = false,
   });
 
   final int id;
@@ -52,6 +53,9 @@ class Yo {
   /// Si la organización tiene el asistente de IA encendido.
   final bool ia;
 
+  /// Si el asistente oye notas de voz y contesta hablando (solo con Gemini).
+  final bool iaVoz;
+
   factory Yo.deJson(Map<String, Object?> m) => Yo(
     id: entero(m['id']) ?? 0,
     correo: '${m['correo'] ?? ''}',
@@ -64,6 +68,7 @@ class Yo {
         if (d is Map) Dominio.deJson(d.cast<String, Object?>()),
     ],
     ia: m['ia'] == true,
+    iaVoz: m['ia'] == true && m['ia_voz'] == true,
   );
 
   Yo conIa(bool ia) => Yo(
@@ -75,6 +80,7 @@ class Yo {
     organizacion: organizacion,
     dominios: dominios,
     ia: ia,
+    iaVoz: ia && iaVoz,
   );
 
   bool get acotado => dominios.isNotEmpty;

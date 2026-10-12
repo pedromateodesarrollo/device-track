@@ -2,6 +2,13 @@
 
 ## Sin publicar
 
+* **Voz en el asistente.** Con el asistente de Gemini, el botón del
+  micrófono manda la pregunta como nota de voz (`POST /v1/ia/voz/transcribir`)
+  y la respuesta se oye (`POST /v1/ia/voz/hablar`, por partes: la primera
+  oración suena en segundos); escrita, se contesta solo escrita, y
+  «Escuchar» lee cualquier respuesta. En el panel web y en la app 0.1.3, que
+  pide el permiso del micrófono al tocarlo. Con Anthropic no hay voz
+  (`ia_voz` en `GET /v1/yo`).
 * **¿Olvidaste tu clave?** En la entrada del panel web y de la app, solo si
   el hub tiene alguna organización con correo de salida (`recuperar` de
   `GET /salud`). `POST /v1/auth/recuperar` manda por el correo de salida de la

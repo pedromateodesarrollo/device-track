@@ -308,12 +308,44 @@ y 3 por hora por correo (`429 demasiados_intentos`).
 | `POST /v1/org/webhook/prueba` | Manda un POST de prueba y dice qué contestó. |
 | `PUT /v1/org/correo` | El correo de salida, con el que salen las invitaciones y los avisos de las reglas: `host`, `puerto`, `seguridad` (`tls` = TLS directo, 465; `starttls`, 587; `ninguna`, solo en una red propia), `remitente`, `usuario`, `clave`, `nombre` (el que se ve en el «De:»). La `clave` no vuelve nunca; si no viene, o viene vacía, se queda la que estaba. `{"quitar": true}` lo borra. Solo `admin`. |
 | `GET /v1/org/ia` | El asistente de IA de la organización: `proveedor`, `modelo`, `activo`, `clave_puesta`, `configurado`, `disponible`, los proveedores con sus modelos sugeridos y lo gastado en 30 días (`uso_30_dias`: `llamadas`, `entrada`, `salida`, en tokens). Solo `admin`. |
-| `PUT /v1/org/ia` | Las credenciales: `proveedor` (`anthropic` o `gemini`), `modelo`, `clave` y `activo`. Son de la organización, con su propia cuenta en el proveedor: el hub no trae una clave propia ni le presta a una organización la de otra. La `clave` no vuelve nunca; si no viene se queda la que estaba, salvo que cambie el proveedor. `{"quitar": true}` lo borra. Solo `admin`. `GET /v1/yo` dice `ia: true` si la organización tiene asistente. |
+| `PUT /v1/org/ia` | Las credenciales: `proveedor` (`anthropic` o `gemini`), `modelo`, `clave` y `activo`. Son de la organización, con su propia cuenta en el proveedor: el hub no trae una clave propia ni le presta a una organización la de otra. La `clave` no vuelve nunca; si no viene se queda la que estaba, salvo que cambie el proveedor. `{"quitar": true}` lo borra. Solo `admin`. `GET /v1/yo` dice `ia: true` si la organización tiene asistente, e `ia_voz: true` si además oye y habla (ver abajo). `GET /v1/org/ia` lo dice en `voz`. |
 | `POST /v1/org/ia/prueba` | Una pregunta mínima al proveedor con lo guardado. Si no contesta, `502` con el motivo: `ia_clave_invalida`, `ia_modelo_no_existe`, `ia_sin_saldo`, `ia_limite`, `ia_proveedor_caido`, `ia_sin_conexion`, `ia_sin_respuesta`, `ia_proveedor_error`. |
 | `POST /v1/org/correo/prueba` | Manda un correo de prueba a quien lo pide. Si el servidor no lo acepta, `502` con lo que contestó (`correo_autenticacion`, `correo_conexion`, `correo_tls`, `correo_sin_starttls`, `correo_rechazado`, `correo_tiempo`). |
 
 El historial de reportes se borra solo pasados `dias_historial` (90 por
 defecto), y una orden que nadie contestó pasa a `vencida` a su hora.
+
+### El asistente y su voz
+
+`POST /v1/ia/chat {mensaje, conversacion?, desfase_min, voz?}` contesta en
+NDJSON (una línea JSON por evento: `conversacion`, `nota`, `herramienta`,
+`propuesta`, `respuesta`, `fin` o `error`). Es de personas (JWT), no de
+llaves. Lo que cambia algo queda propuesto y se confirma con
+`POST /v1/ia/propuestas/:id/confirmar` (o `/descartar`).
+
+**Voz.** Toda pregunta se puede hacer con una nota de voz, y la que se hace
+así se contesta también en voz. Solo si el asistente de la organización es de
+Google (Gemini): Anthropic no oye ni habla, y entonces estas rutas contestan
+`409 ia_sin_voz`. Se usa la misma clave de la organización, con modelos
+propios: oye `gemini-3.8-flash` (sin razonar) y habla `gemini-3.8-flash-tts`
+(voz «Kore»). El gasto va a lo de la organización como el del chat (orígenes
+`voz.transcribir` y `voz.hablar`).
+
+```
+nota de voz ─► POST /v1/ia/voz/transcribir {audio, mime} ─► {texto}
+           ─► POST /v1/ia/chat {mensaje: texto, voz: true}     (contesta como se habla)
+respuesta  ─► POST /v1/ia/voz/hablar {texto, parte: 0} ─► {audio, mime, parte, partes}
+           ─► mientras suena, parte 1, 2…  (una por delante)
+```
+
+| | |
+|---|---|
+| `POST /v1/ia/voz/transcribir` | `audio` en base64 (con o sin `data:…;base64,`) y `mime` (`audio/webm;codecs=opus`, `audio/ogg`, `audio/mp4`/`m4a`, `audio/aac`, `audio/wav`, `audio/mpeg`). Hasta 1,4 MB de audio (tres minutos en Opus o AAC a 32 kbps). Devuelve `{texto}`; `422 no_se_entendio` si no se oyó nada, `413 audio_largo`, `400 audio_invalido`. |
+| `POST /v1/ia/chat` con `voz: true` | La pregunta lleva un aviso para el modelo: contestar como se habla (lo principal primero, cantidades redondeadas, tablas al final) y desconfiar de un nombre o número mal transcrito. En la conversación, el mensaje de la persona queda con `voz: true`. |
+| `POST /v1/ia/voz/hablar` | `texto` es la respuesta como se pinta (Markdown) y `parte` desde 0. El hub la pasa a lo que se dice (las tablas y el código no se leen: «El detalle está en la tabla de la pantalla»; sin marcas) y la parte siempre igual: la primera parte es la primera oración, que empieza a sonar en 2 a 4 s; las demás, de hasta ~550 letras; pasadas ~3500, «el resto está en la pantalla». Devuelve `{audio (WAV en base64), mime: "audio/wav", parte, partes}`. |
+
+Al modelo de voz se le manda solo el texto que hay que decir: no acepta
+instrucción de sistema, y lo que se le diga del tono lo lee en voz alta.
 
 ## Lo que NO hace
 

@@ -4,6 +4,7 @@ import '../correo.dart';
 import '../db.dart';
 import '../dominios.dart';
 import '../ia/config.dart';
+import '../ia/voz.dart';
 import '../limitador.dart';
 import '../log.dart';
 import '../seguridad.dart';
@@ -220,8 +221,8 @@ void registraRutasAuth(Servidor s) {
     if (u == null) return Respuesta.falla(404, 'no_encontrado', '');
     // Si la organización tiene asistente: el panel enseña el chat y deja
     // cambiar los tableros. Las credenciales no salen de aquí.
-    final ia = ConfigIa.deJson(u.remove('ia'))?.disponible ?? false;
-    return Respuesta.ok({...u, 'dominios': dominios, 'ia': ia});
+    final c = ConfigIa.deJson(u.remove('ia'));
+    return Respuesta.ok({...u, 'dominios': dominios, 'ia': c?.disponible ?? false, 'ia_voz': tieneVoz(c)});
   });
 
   s.ruta('GET', '/v1/usuarios', (p) async {

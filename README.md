@@ -70,7 +70,9 @@ device-track resuelve eso con dos cosas: **una app pequeña en cada equipo** y
   invitación es un enlace que compartes tú.
 * **Un asistente de IA**, si la organización pone las credenciales de su
   propia cuenta con Anthropic (Claude) o Google (Gemini). device-track no trae
-  una clave propia: cada organización usa y paga la suya.
+  una clave propia: cada organización usa y paga la suya. Con Gemini se le
+  pregunta también con una **nota de voz**, y lo que se pregunta hablando se
+  contesta hablando (en el panel web y en la app).
 
 ![El mapa con los equipos y las zonas](docs/img/mapa.jpg)
 

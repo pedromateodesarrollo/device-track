@@ -624,6 +624,16 @@ table.compacta th, table.compacta td { padding: 6px 8px; }
 .propuesta dd { margin: 0; overflow-wrap: anywhere; }
 .entrada-chat { display: flex; gap: 10px; align-items: flex-end; margin-top: 8px; }
 .entrada-chat textarea { flex: 1; resize: vertical; min-height: 48px; max-height: 220px; }
+/* La voz del asistente. */
+.microfono { padding-left: 14px; padding-right: 14px; }
+.microfono svg { width: 20px; height: 20px; fill: currentColor; display: block; }
+.grabando-nota { align-items: center; min-height: 48px; padding: 8px 12px; border: 1px solid var(--borde); border-radius: var(--radio); background: var(--fondo-2); }
+.punto-rojo { width: 10px; height: 10px; border-radius: 50%; background: var(--mal); animation: latido-nota 1s ease-in-out infinite; }
+.tiempo-nota { font-variant-numeric: tabular-nums; white-space: nowrap; }
+.escuchar { margin-top: 8px; }
+.marca-voz { opacity: .85; }
+@keyframes latido-nota { 50% { opacity: .25; } }
+@media (prefers-reduced-motion: reduce) { .punto-rojo { animation: none; } }
 @media (max-width: 860px) {
   .asistente { grid-template-columns: 1fr; height: calc(100dvh - 170px); }
   .conversaciones { display: none; border: 0; padding: 0; }

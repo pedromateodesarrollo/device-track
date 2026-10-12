@@ -55,6 +55,8 @@ class ConfigIa {
     'clave_puesta': clave.isNotEmpty,
     'configurado': completa,
     'disponible': disponible,
+    // La voz del asistente (voz.dart): solo Gemini oye y habla.
+    'voz': disponible && proveedor == 'gemini',
   };
 
   static ConfigIa? deJson(Object? j) {
