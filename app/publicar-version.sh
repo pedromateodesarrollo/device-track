@@ -27,6 +27,8 @@ BUILD="$(sed -E 's/^version:[[:space:]]*[^+]+\+([0-9]+).*/\1/' <<<"$LINEA")"
   || { echo "Error: no entiendo «$LINEA» en pubspec.yaml (va como version: X.Y.Z+N)" >&2; exit 2; }
 
 APK="$DIR/build/app/outputs/flutter-apk/app-release.apk"
+# Una compilación a la vez en esta máquina, en fila (scripts/turno-compilar.sh).
+[[ "${SKIP_BUILD:-}" = "1" ]] || . "$RAIZ/scripts/turno-compilar.sh"
 if [[ "${SKIP_BUILD:-}" = "1" ]]; then
   echo "== SKIP_BUILD=1: reusando $APK"
 else
@@ -35,6 +37,7 @@ else
   # El demonio de Gradle se queda con la RAM horas si no se le para.
   (cd "$DIR/android" && ./gradlew --stop >/dev/null 2>&1) || true
 fi
+[[ "${SKIP_BUILD:-}" = "1" ]] || turno_soltar
 [[ -f "$APK" ]] || { echo "Error: no existe $APK." >&2; exit 1; }
 
 # El hub y la app salen del APK (manifestPlaceholders de android/app/build.gradle.kts).

@@ -39,7 +39,10 @@ compila() {
   echo "→ compilando (AOT)…"
   cd "$SCRIPT_DIR"
   dart pub get >/dev/null
+  # Una compilación a la vez en esta máquina, en fila (scripts/turno-compilar.sh).
+  . "$SCRIPT_DIR/../../scripts/turno-compilar.sh"
   dart compile exe bin/device_track_hub.dart -o "/tmp/$BINARY_NAME"
+  turno_soltar
 }
 
 # El servicio corre con un usuario propio, sin shell ni casa, y no escribe en
