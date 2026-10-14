@@ -9,6 +9,7 @@ import 'package:flutter/material.dart';
 
 import '../modelo/equipo.dart';
 import '../modelo/formato.dart';
+import '../modelo/ubicacion.dart' show avisoUbicacion;
 import '../modelo/yo.dart' show Dominio;
 import '../navegacion.dart';
 import '../sesion.dart';
@@ -311,6 +312,14 @@ class TarjetaEquipo extends StatelessWidget {
                     style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 16),
                   ),
                 ),
+                if (avisoUbicacion(e) case final aviso?) ...[
+                  Tooltip(
+                    message: aviso,
+                    triggerMode: TooltipTriggerMode.longPress,
+                    child: Icon(Icons.location_disabled_outlined, size: 18, color: p.tibio, semanticLabel: aviso),
+                  ),
+                  const SizedBox(width: 6),
+                ],
                 if (alertas > 0) ...[
                   Pastilla.roja(context, alertas == 1 ? '1 alerta' : '$alertas alertas'),
                   const SizedBox(width: 6),

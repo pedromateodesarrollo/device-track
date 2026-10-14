@@ -2,6 +2,16 @@
 
 ## Sin publicar
 
+* **Por qué no hay ubicación.** Cada reporte trae `ubicacion_estado`: el
+  motivo (sin permiso, negado para siempre, solo aproximada, ubicación del
+  teléfono apagada, sin GPS ni red, sin «todo el tiempo», ahorro de batería,
+  sin señal bajo techo, posición vieja o simulada, la organización no la pide)
+  y lo que el equipo sabe (permiso, servicios de Google, proveedor, precisión,
+  antigüedad…). El hub lo guarda por fuente (migración 0008) y lo devuelve en
+  los equipos; el panel web y la app del panel (0.1.4) lo dicen en «Ubicación»
+  con un «Qué hacer», y la lista marca los que se pueden arreglar. Una versión
+  vieja sale como «El equipo aún no informa el motivo». Agente 0.1.4; en el
+  plugin, `DeviceTrack.ubicacionPedida()` y `EstadoDeviceTrack.ubicacion`.
 * **Voz en el asistente.** Con el asistente de Gemini, el botón del
   micrófono manda la pregunta como nota de voz (`POST /v1/ia/voz/transcribir`)
   y la respuesta se oye (`POST /v1/ia/voz/hablar`, por partes: la primera

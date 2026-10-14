@@ -85,6 +85,22 @@ en el momento que tenga sentido para la persona. No hace falta la ubicación
 app abierta. Con el permiso de ubicación, Android también da el nombre de la
 red Wi-Fi.
 
+**Por qué no hay ubicación.** Cada reporte lleva `ubicacion_estado`: el motivo
+(permiso no pedido, negado, negado para siempre, solo aproximada, ubicación del
+teléfono apagada, sin señal…) y lo que el equipo sabe de ella; el panel lo
+enseña con un «Qué hacer». `estado.value.ubicacion` lo tiene para la pantalla
+de la app. Para distinguir «la app todavía no lo pidió» de «dijeron que no para
+siempre», avisa después de pedirlo:
+
+```dart
+await Permission.location.request();
+await equipos.ubicacionPedida(); // DESPUÉS de la respuesta
+await equipos.reportar();        // que el panel se entere ya
+```
+
+Si la respuesta pasa por la pantalla de Flutter (`permission_handler` lo hace),
+el plugin también la ve y la anota solo.
+
 ## Qué hace solo
 
 * **Alta.** La primera vez se da de alta con el código, como fuente `app` con el

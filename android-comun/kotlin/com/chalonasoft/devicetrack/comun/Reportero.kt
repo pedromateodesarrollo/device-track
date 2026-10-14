@@ -26,9 +26,17 @@ class Reportero(context: Context, private val tipo: String) {
         if (!almacen.dadoDeAlta) return null
         almacen.ultimoIntentoT = System.currentTimeMillis()
         val r = Lectura.estado(ctx).put("t", Fechas.iso()).put("motivo", motivo)
-        // Al apagarse no hay tiempo de esperar al GPS.
-        if (conUbicacion && almacen.ubicacion && motivo != "apagando" && Ubicacion.tienePermiso(ctx)) {
-            Ubicacion.leer(ctx)?.let { r.put("ubicacion", Ubicacion.json(it)) }
+        // Al apagarse no hay tiempo de esperar al GPS: ese reporte va sin
+        // ubicación y sin su estado (en el hub queda el de antes).
+        if (conUbicacion && motivo != "apagando") {
+            if (almacen.ubicacion) {
+                // El agente lee sin pantalla delante: necesita «todo el tiempo».
+                val u = Ubicacion.leerConEstado(ctx, segundoPlano = tipo == "agente")
+                u.posicion?.let { r.put("ubicacion", Ubicacion.json(it)) }
+                r.put("ubicacion_estado", u.estado)
+            } else {
+                r.put("ubicacion_estado", JSONObject().put("motivo", "no_pedida"))
+            }
         }
 
         val cuerpo = JSONObject(r.toString())

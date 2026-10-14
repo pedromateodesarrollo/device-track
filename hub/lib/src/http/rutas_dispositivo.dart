@@ -186,16 +186,18 @@ void registraRutasDispositivo(Servidor s, Ordenes ordenes, Alertas alertas) {
     });
     final ultimo = reportes.last;
     Map<String, Object?>? ultimaUbicacion;
+    Map<String, Object?>? ultimoEstadoUbicacion;
     for (final r in reportes) {
       if (r['lat'] != null) ultimaUbicacion = r;
+      if (r['ubicacion_estado'] != null) ultimoEstadoUbicacion = r;
     }
 
     await p.bd.transaccion((tx) async {
       for (final r in reportes) {
         await tx.ejecuta(
           '''insert into dt.reporte (equipo, fuente, t, motivo, bateria, cargando, red_tipo, red_ssid,
-                                     lat, lng, precision_m, almacenamiento_libre)
-             values (@e, @f, @t, @m, @b, @c, @rt, @rs, @la, @lo, @pr, @al)''',
+                                     lat, lng, precision_m, almacenamiento_libre, ubicacion_motivo)
+             values (@e, @f, @t, @m, @b, @c, @rt, @rs, @la, @lo, @pr, @al, @um)''',
           {
             'e': e.equipo,
             'f': e.fuente,
@@ -209,6 +211,7 @@ void registraRutasDispositivo(Servidor s, Ordenes ordenes, Alertas alertas) {
             'lo': r['lng'],
             'pr': r['precision_m'],
             'al': r['almacenamiento_libre'],
+            'um': (r['ubicacion_estado'] as Map?)?['motivo'],
           },
         );
       }
@@ -253,6 +256,19 @@ void registraRutasDispositivo(Servidor s, Ordenes ordenes, Alertas alertas) {
             'lo': ultimaUbicacion['lng'],
             'pr': ultimaUbicacion['precision_m'],
             't': ultimaUbicacion['ubicacion_t'],
+          },
+        );
+      }
+      // Por qué hay o no hay ubicación, en la fuente que lo dijo: el del
+      // reporte más nuevo que lo trae. Uno sin él (al apagarse) no lo borra.
+      if (ultimoEstadoUbicacion != null) {
+        await tx.ejecuta(
+          '''update dt.fuente set ubicacion_estado = @u::jsonb, ubicacion_estado_t = @t
+              where id = @f and (ubicacion_estado_t is null or ubicacion_estado_t <= @t)''',
+          {
+            'f': e.fuente,
+            'u': jsonEncode(ultimoEstadoUbicacion['ubicacion_estado']),
+            't': ultimoEstadoUbicacion['t'],
           },
         );
       }
@@ -357,7 +373,39 @@ Map<String, Object?> _leeReporte(Map<String, Object?> r, bool conUbicacion) {
         : null,
     'almacenamiento_libre': _entero(alm['libre'], 0, 1 << 52),
     'almacenamiento_total': _entero(alm['total'], 0, 1 << 52),
+    'ubicacion_estado': _estadoUbicacion(r['ubicacion_estado'], conUbicacion),
   };
+}
+
+const _estadoSiNo = {
+  'pedido', 'segundo_plano', 'necesita_segundo_plano', 'servicio', 'gps', 'red', 'red_existe',
+  'google_play', 'ahorro', 'sin_optimizar', 'reposo', 'avion', 'wifi', 'escaneo_wifi', 'simulada',
+};
+const _estadoTextos = {'permiso', 'proveedor', 'ultima_proveedor', 'ahorro_ubicacion', 'error'};
+const _estadoNumeros = {'precision_m', 'edad_s', 'espera_s', 'ultima_edad_s'};
+
+/// `ubicacion_estado` del reporte, acotado a las claves que se conocen (ver
+/// docs/api.md). Null si no trae `motivo`. Un motivo que el hub no conoce se
+/// guarda igual (el panel enseña el código): el equipo puede ser más nuevo.
+/// Si la organización no pide la ubicación, el motivo es ese y nada más.
+Map<String, Object?>? _estadoUbicacion(Object? v, bool conUbicacion) {
+  final m = _mapa(v);
+  final motivo = _texto(m['motivo'], 40);
+  if (motivo.isEmpty) return null;
+  if (!conUbicacion) return {'motivo': 'no_pedida'};
+  final r = <String, Object?>{'motivo': RegExp(r'^[a-z_]{1,40}$').hasMatch(motivo) ? motivo : 'otro'};
+  for (final k in _estadoSiNo) {
+    if (m[k] is bool) r[k] = m[k];
+  }
+  for (final k in _estadoTextos) {
+    final t = _textoONull(m[k], k == 'error' ? 200 : 40);
+    if (t != null) r[k] = t;
+  }
+  for (final k in _estadoNumeros) {
+    final n = _real(m[k], 0, 1e9);
+    if (n != null) r[k] = n;
+  }
+  return r;
 }
 
 /// La lista de apps instaladas, acotada: `[{paquete, version, build}]`.

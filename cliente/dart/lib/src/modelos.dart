@@ -265,6 +265,57 @@ class Ubicacion {
       };
 }
 
+/// Por qué hay (o no hay) ubicación: va en cada reporte como
+/// `ubicacion_estado` y el panel lo enseña en «Ubicación» con un «Qué hacer».
+///
+/// [motivo] es uno de [motivos]; [datos] trae lo demás que el equipo sabe
+/// (`permiso`, `servicio`, `gps`, `red`, `google_play`, `ahorro`, `proveedor`,
+/// `precision_m`, `edad_s`…; ver docs/api.md). Leer es tolerante: un motivo
+/// que esta versión no conoce se conserva tal cual.
+class EstadoUbicacion {
+  const EstadoUbicacion(this.motivo, [this.datos = const {}]);
+
+  /// Los que distingue el equipo.
+  static const motivos = {
+    'ok', 'aproximada', 'simulada', 'vieja', // hay posición
+    'no_pedida', 'no_declarada', 'sin_pedir', 'denegada', 'denegada_siempre',
+    'servicio_apagado', 'sin_proveedor', 'sin_segundo_plano', 'ahorro_bateria',
+    'sin_senal', 'error',
+  };
+
+  /// La organización no pide la ubicación.
+  static const noPedida = EstadoUbicacion('no_pedida');
+
+  final String motivo;
+  final Map<String, Object?> datos;
+
+  /// Hay posición (buena o no tanto).
+  bool get hayPosicion => const {'ok', 'aproximada', 'simulada', 'vieja'}.contains(motivo);
+
+  /// Null si no trae `motivo`.
+  static EstadoUbicacion? desdeJson(Object? j) {
+    final m = _mapa(j);
+    final motivo = _textoONull(m['motivo']);
+    if (motivo == null) return null;
+    return EstadoUbicacion(motivo, {for (final e in m.entries) if (e.key != 'motivo') e.key: e.value});
+  }
+
+  Map<String, Object?> toJson() => {...datos, 'motivo': motivo};
+
+  @override
+  bool operator ==(Object other) =>
+      other is EstadoUbicacion && other.motivo == motivo && _igualMapa(other.datos, datos);
+
+  @override
+  int get hashCode => Object.hash(motivo, datos.length);
+
+  @override
+  String toString() => 'EstadoUbicacion($motivo)';
+}
+
+bool _igualMapa(Map<String, Object?> a, Map<String, Object?> b) =>
+    a.length == b.length && a.entries.every((e) => b.containsKey(e.key) && b[e.key] == e.value);
+
 /// La red: `wifi`, `datos`, `ninguna` u `otra`, y el nombre de la Wi-Fi si
 /// Android lo da (pide permiso de ubicación).
 class Red {
@@ -342,6 +393,7 @@ class Reporte {
     this.cargando,
     this.red,
     this.ubicacion,
+    this.ubicacionEstado,
     this.almacenamiento,
     this.apps,
     this.contexto,
@@ -359,6 +411,10 @@ class Reporte {
   final bool? cargando;
   final Red? red;
   final Ubicacion? ubicacion;
+
+  /// Por qué hay o no hay [ubicacion]. Sin él (un reporte al apagarse), el hub
+  /// se queda con el de antes.
+  final EstadoUbicacion? ubicacionEstado;
   final Almacenamiento? almacenamiento;
 
   /// Mandarla solo cuando cambió: el hub guarda la última.
@@ -390,6 +446,7 @@ class Reporte {
         cargando: cargando,
         red: red,
         ubicacion: ubicacion,
+        ubicacionEstado: ubicacionEstado,
         almacenamiento: almacenamiento,
       );
 
@@ -401,6 +458,7 @@ class Reporte {
     Fuente? fuente,
     int? android,
     Ubicacion? ubicacion,
+    EstadoUbicacion? ubicacionEstado,
   }) =>
       Reporte(
         t: t,
@@ -409,6 +467,7 @@ class Reporte {
         cargando: cargando,
         red: red,
         ubicacion: ubicacion ?? this.ubicacion,
+        ubicacionEstado: ubicacionEstado ?? this.ubicacionEstado,
         almacenamiento: almacenamiento,
         apps: apps ?? this.apps,
         contexto: contexto ?? this.contexto,
@@ -429,6 +488,7 @@ class Reporte {
       cargando: m['cargando'] is bool ? m['cargando'] as bool : null,
       red: Red.desdeJson(m['red']),
       ubicacion: Ubicacion.desdeJson(m['ubicacion']),
+      ubicacionEstado: EstadoUbicacion.desdeJson(m['ubicacion_estado']),
       almacenamiento: Almacenamiento.desdeJson(m['almacenamiento']),
       apps: apps is List ? [for (final a in apps) if (AppInstalada.desdeJson(a) case final x?) x] : null,
       contexto: contexto is Map ? Map<String, Object?>.from(contexto) : null,
@@ -445,6 +505,7 @@ class Reporte {
         if (cargando != null) 'cargando': cargando,
         if (red != null) 'red': red!.toJson(),
         if (ubicacion != null) 'ubicacion': ubicacion!.toJson(),
+        if (ubicacionEstado != null) 'ubicacion_estado': ubicacionEstado!.toJson(),
         if (almacenamiento != null) 'almacenamiento': almacenamiento!.toJson(),
         if (apps != null) 'apps': [for (final a in apps!) a.toJson()],
         if (contexto != null) 'contexto': contexto,

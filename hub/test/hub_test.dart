@@ -499,6 +499,78 @@ void main() {
     await pide('PATCH', '/v1/org', json: {'ubicacion': true}, token: admin);
   });
 
+  test('por qué no hay ubicación: por fuente, el que consiguió gana, y sin él «versión vieja»', () async {
+    final c = await codigo();
+    final agente = await alta(c, 'huella-motivo');
+    final app = await alta(c, 'huella-motivo', tipo: 'app', paquete: 'com.chalona.wms_app');
+    final id = agente['equipo']['id'];
+
+    // Una versión vieja no lo manda: null, y el panel lo dice.
+    await pide('POST', '/v1/reporte', json: {'bateria': 80}, token: app['credencial'] as String);
+    var (_, d) = await pide('GET', '/v1/equipos/$id', token: admin);
+    expect(d['ubicacion_estado'], isNull);
+
+    // La app sin permiso, negado para siempre; lo que no se conoce se cae.
+    await pide('POST', '/v1/reporte',
+        json: {
+          'ubicacion_estado': {
+            'motivo': 'denegada_siempre', 'permiso': 'ninguno', 'pedido': true, 'servicio': true,
+            'gps': true, 'google_play': false, 'precision_m': 'mucha', 'clave_rara': 'x',
+          },
+        },
+        token: app['credencial'] as String);
+    (_, d) = await pide('GET', '/v1/equipos/$id', token: admin);
+    final u = d['ubicacion_estado'] as Map;
+    expect(u['motivo'], 'denegada_siempre');
+    expect(u['pedido'], isTrue);
+    expect(u['google_play'], isFalse);
+    expect(u['fuente_paquete'], 'com.chalona.wms_app');
+    expect(u['fuente_tipo'], 'app');
+    expect(u['t'], isNotNull);
+    expect(u.containsKey('precision_m'), isFalse);
+    expect(u.containsKey('clave_rara'), isFalse);
+    final fuenteApp = (d['fuentes'] as List).firstWhere((f) => f['paquete'] == 'com.chalona.wms_app');
+    expect(fuenteApp['ubicacion_estado']['motivo'], 'denegada_siempre');
+
+    // El agente sí la consigue: el equipo dice esa, aunque la app sea más nueva.
+    await pide('POST', '/v1/reporte',
+        json: {
+          't': DateTime.now().toUtc().subtract(const Duration(minutes: 1)).toIso8601String(),
+          'ubicacion': {'lat': 18.47, 'lng': -69.9, 'precision_m': 12},
+          'ubicacion_estado': {'motivo': 'ok', 'permiso': 'precisa', 'proveedor': 'gps', 'precision_m': 12, 'edad_s': 2},
+        },
+        token: agente['credencial'] as String);
+    (_, d) = await pide('GET', '/v1/equipos/$id', token: admin);
+    expect(d['ubicacion_estado']['motivo'], 'ok');
+    expect(d['ubicacion_estado']['proveedor'], 'gps');
+    expect(d['ubicacion_estado']['fuente_tipo'], 'agente');
+    final (_, l) = await pide('GET', '/v1/equipos?q=huella-motivo', token: admin);
+    expect((l['equipos'] as List).single['ubicacion_estado']['motivo'], 'ok');
+
+    // Un reporte atrasado no pisa el estado de uno más nuevo; el historial
+    // guarda el motivo de cada uno.
+    await pide('POST', '/v1/reporte',
+        json: {
+          't': DateTime.now().toUtc().subtract(const Duration(hours: 2)).toIso8601String(),
+          'ubicacion_estado': {'motivo': 'sin_senal'},
+        },
+        token: agente['credencial'] as String);
+    (_, d) = await pide('GET', '/v1/equipos/$id', token: admin);
+    expect(d['ubicacion_estado']['motivo'], 'ok');
+    final (_, h) = await pide('GET', '/v1/equipos/$id/reportes?desde=2000-01-01T00:00:00Z', token: admin);
+    expect((h['reportes'] as List).map((r) => r['ubicacion_motivo']).toSet(),
+        containsAll(['ok', 'sin_senal', 'denegada_siempre', null]));
+
+    // Sin ubicación en la organización, el motivo es ese y nada más.
+    await pide('PATCH', '/v1/org', json: {'ubicacion': false}, token: admin);
+    await pide('POST', '/v1/reporte',
+        json: {'ubicacion_estado': {'motivo': 'ok', 'permiso': 'precisa'}}, token: app['credencial'] as String);
+    await pide('PATCH', '/v1/org', json: {'ubicacion': true}, token: admin);
+    (_, d) = await pide('GET', '/v1/equipos/$id', token: admin);
+    final f2 = (d['fuentes'] as List).firstWhere((f) => f['paquete'] == 'com.chalona.wms_app');
+    expect(f2['ubicacion_estado'], {'motivo': 'no_pedida'});
+  });
+
   test('dominios: quien está limitado a uno ve y maneja solo lo suyo', () async {
     final duralon = await dominio('Duralon');
     final jf = await dominio('JF');

@@ -26,6 +26,7 @@ try {
 import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
 import { api, consulta, cargaDominios, hace, fecha, estados, redes, colorEquipo } from '../api.js'
 import Bateria from './Bateria.vue'
+import { avisoUbicacion } from '../ubicacion.js'
 
 const props = defineProps({ yo: Object, filtros: { type: Object, default: () => ({}) } })
 
@@ -146,7 +147,7 @@ const aplicacion = (e) => {
 // Una fila por equipo con lo que se calcula una vez: lo pintan la tabla y las
 // tarjetas, y por ello se ordena.
 const filas = computed(() =>
-  visibles.value.map((e) => ({ e, app: aplicacion(e), usuario: ultimoUsuario(e), red: red(e) })),
+  visibles.value.map((e) => ({ e, app: aplicacion(e), usuario: ultimoUsuario(e), red: red(e), ubic: avisoUbicacion(e) })),
 )
 
 // Cada columna dice con qué valor se ordena y hacia dónde va el primer clic:
@@ -278,9 +279,10 @@ const sentido = (c, dir) => sentidos[c.tipo][dir]
       </tr>
     </thead>
     <tbody>
-      <tr v-for="{ e, app, usuario, red: r } in ordenadas" :key="e.id" @click="abre(e)" :class="{ retirado: e.estado === 'retirado' }">
+      <tr v-for="{ e, app, usuario, red: r, ubic } in ordenadas" :key="e.id" @click="abre(e)" :class="{ retirado: e.estado === 'retirado' }">
         <td>
           <a :href="`#/panel/equipos/${e.id}`" @click.stop><strong>{{ e.nombre }}</strong></a>
+          <span v-if="ubic" class="sin-ubic" :title="ubic" aria-label="Problema con la ubicación">⌖</span>
           <div class="apagado chico">
             <span v-if="e.etiqueta">{{ e.etiqueta }}</span>
             <span v-if="e.etiqueta && e.modelo"> · </span>
@@ -322,7 +324,7 @@ const sentido = (c, dir) => sentidos[c.tipo][dir]
   <!-- Teléfono y tableta: tarjetas. -->
   <div v-if="visibles.length" class="tarjetas-equipos solo-angosto">
     <a
-      v-for="{ e, app, usuario, red: r } in ordenadas"
+      v-for="{ e, app, usuario, red: r, ubic } in ordenadas"
       :key="e.id"
       :href="`#/panel/equipos/${e.id}`"
       class="tarjeta-equipo"
@@ -331,6 +333,7 @@ const sentido = (c, dir) => sentidos[c.tipo][dir]
       <div class="fila-1">
         <span class="punto" :class="e.conectado ? 'ok' : ''"></span>
         <strong>{{ e.nombre }}</strong>
+        <span v-if="ubic" class="sin-ubic" :title="ubic" aria-label="Problema con la ubicación">⌖</span>
         <span v-if="e.alertas" class="nueva rojo">{{ e.alertas }} {{ e.alertas === 1 ? 'alerta' : 'alertas' }}</span>
         <span class="estado-equipo" :class="e.estado" style="margin-left: auto">{{ estados[e.estado] }}</span>
       </div>

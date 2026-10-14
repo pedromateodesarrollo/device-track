@@ -138,6 +138,7 @@ que llegó.
 | `red.tipo` | texto | `wifi`, `datos`, `ninguna`. |
 | `red.ssid` | texto | Nombre de la red Wi-Fi (Android pide permiso de ubicación para darlo). |
 | `ubicacion` | objeto | `{lat, lng, precision_m, t}`. Solo si la organización la pide y el equipo dio el permiso. |
+| `ubicacion_estado` | objeto | Por qué hay o no hay `ubicacion`: `{motivo, …}`. Ver abajo. Mandarlo en cada reporte, también sin posición: es lo que el panel enseña en vez de «sin ubicación». Si no viene (un reporte al apagarse, una versión vieja), en el hub queda el de antes. |
 | `almacenamiento` | objeto | `{libre, total}` en bytes. |
 | `apps` | lista | `[{paquete, version, build}]`. Mandarla solo cuando cambia: el hub guarda la última. |
 | `contexto` | objeto | Lo que la app quiera contar: empresa, quién tiene la sesión, almacén. Se guarda por fuente. Hasta 4 KB. |
@@ -155,6 +156,64 @@ entiende tres claves, si vienen:
 
 Ejemplo (la app de un almacén): `{"usuario": "Ana Pérez", "usuario_id": 42,
 "empresa": 7, "almacen": "A1 · Repuestos", "sesion": true}`.
+
+**Por qué no hay ubicación: `ubicacion_estado`.** El `motivo` dice lo
+principal, en este orden de prioridad:
+
+| `motivo` | Qué pasa | Se arregla |
+|---|---|---|
+| `ok` | Hay posición recién leída | — |
+| `aproximada` | Hay posición, pero la app solo tiene el permiso aproximado (± km) | Permisos › Ubicación › «Usar ubicación precisa» |
+| `simulada` | La posición viene de una app de ubicación falsa | Opciones de desarrollador |
+| `vieja` | No llegó una nueva; va la última del teléfono (de menos de 10 min) | — |
+| `no_pedida` | La organización no pide la ubicación | `PATCH /v1/org {ubicacion: true}` |
+| `no_declarada` | La app no declara el permiso en su manifiesto: nunca la tendrá | Otra versión de la app |
+| `sin_pedir` | La app todavía no ha pedido el permiso | Abrir la app (o darlo en Ajustes) |
+| `denegada` | Dijeron que no; la app lo puede volver a pedir | Ajustes › Aplicaciones › la app › Permisos › Ubicación |
+| `denegada_siempre` | Dijeron que no con «No volver a preguntar»: solo en Ajustes | Igual |
+| `servicio_apagado` | La ubicación del teléfono está apagada | Barra de arriba › Ubicación |
+| `sin_proveedor` | Encendida, pero sin GPS ni ubicación por red | Ajustes › Ubicación |
+| `sin_segundo_plano` | Quien lee lo hace con la app cerrada (el agente) y solo tiene «mientras se usa»; no llegó ninguna | Permitir todo el tiempo |
+| `ahorro_bateria` | El ahorro de batería o el reposo no la dejaron leer; no llegó ninguna | Quitar el ahorro / «Sin restricciones» |
+| `sin_senal` | Todo permitido y encendido, pero no llegó ninguna en el plazo (bajo techo, sin Wi-Fi ni antenas) | Llevarlo a un sitio abierto |
+| `error` | Falló la lectura (`error`: la excepción) | — |
+
+Un motivo que el hub no conoce se guarda igual (letras minúsculas y `_`, hasta
+40): un equipo puede ser más nuevo que el hub. Si la organización no pide la
+ubicación, el hub lo guarda como `no_pedida` sin lo demás.
+
+Lo demás es opcional, y el hub guarda solo estas claves (lo que no cuadra se
+ignora):
+
+| Clave | Tipo | |
+|---|---|---|
+| `permiso` | texto | `precisa`, `aproximada` o `ninguno`. |
+| `pedido` | sí/no | La app ya pidió el permiso alguna vez (Android no lo dice: lo anota la app). |
+| `segundo_plano` | sí/no | Tiene «Permitir todo el tiempo» (Android 10+). |
+| `necesita_segundo_plano` | sí/no | Quien lee lo hace con la app cerrada (el agente). |
+| `servicio` | sí/no | El interruptor «Ubicación» del teléfono. |
+| `gps`, `red` | sí/no | Proveedores encendidos. |
+| `red_existe` | sí/no | El teléfono tiene ubicación por red (sin servicios de Google, a veces no). |
+| `google_play` | sí/no | Servicios de Google instalados y activos. |
+| `ahorro`, `ahorro_ubicacion` | sí/no, texto | Ahorro de batería y qué le hace a la ubicación: `sin_cambio`, `sin_gps_pantalla_apagada`, `sin_ubicacion_pantalla_apagada`, `solo_al_frente`, `limitada`. |
+| `reposo` | sí/no | El teléfono está en reposo (Doze). |
+| `sin_optimizar` | sí/no | La app está fuera de la optimización de batería. |
+| `avion`, `wifi`, `escaneo_wifi` | sí/no | Modo avión; Wi-Fi encendido; búsqueda de redes Wi-Fi siempre activa (ubica bajo techo con el Wi-Fi apagado). |
+| `proveedor` | texto | Quién dio la posición: `gps`, `network`, `fused`, `passive`. |
+| `precision_m`, `edad_s` | número | De la posición mandada: radio de error y antigüedad al leerla. |
+| `simulada` | sí/no | La posición es de una app de ubicación simulada. |
+| `espera_s` | número | Cuánto se esperó una posición. |
+| `ultima_edad_s`, `ultima_proveedor` | número, texto | Sin posición: de cuándo es la última que tenía el teléfono, y de quién. |
+| `error` | texto | Con `motivo: error`. |
+
+```json
+{"motivo": "sin_senal", "permiso": "precisa", "servicio": true, "gps": true, "red": true,
+ "google_play": true, "wifi": false, "espera_s": 20, "ultima_edad_s": 7300}
+```
+
+El hub lo guarda **por fuente** (el agente puede tener «todo el tiempo» y la
+app del mismo teléfono no tener permiso) y apunta el `motivo` de cada reporte
+en el historial (`ubicacion_motivo`).
 
 La respuesta trae la configuración vigente y las órdenes que estén esperando:
 un equipo sin WebSocket también se entera, en el siguiente reporte.
@@ -219,8 +278,8 @@ zonas, reglas y códigos de alta, `ordenar` para mandarle órdenes a un equipo y
 | | |
 |---|---|
 | `GET /v1/resumen` | Cuántos equipos, conectados, perdidos, sin contacto en 24 h y alertas abiertas (de los dominios que alcanzas). |
-| `GET /v1/equipos` | El inventario. Filtros: `q` (nombre, etiqueta, serie, modelo, asignado a), `dominio`, `estado`, `conectado=1/0`, `alerta=1`, `sin_contacto=1` (más de 24 h sin contacto, la misma cuenta del resumen), `retirados=1`. Cada uno con su `dominio` (id) y `dominio_nombre`, su último reporte resumido y sus fuentes (`tipo`, `paquete`, `nombre`, `version`, `ultima_vez`, `contexto`; la que reportó más reciente, primero: es la «Aplicación» de la lista del panel). |
-| `GET /v1/equipos/:id` | Ficha: datos, fuentes con su contexto, último reporte, apps instaladas, alertas abiertas. |
+| `GET /v1/equipos` | El inventario. Filtros: `q` (nombre, etiqueta, serie, modelo, asignado a), `dominio`, `estado`, `conectado=1/0`, `alerta=1`, `sin_contacto=1` (más de 24 h sin contacto, la misma cuenta del resumen), `retirados=1`. Cada uno con su `dominio` (id) y `dominio_nombre`, su último reporte resumido, su `ubicacion_estado` (ver abajo) y sus fuentes (`tipo`, `paquete`, `nombre`, `version`, `ultima_vez`, `contexto`, `ubicacion_estado`, `ubicacion_estado_t`; la que reportó más reciente, primero: es la «Aplicación» de la lista del panel). |
+| `GET /v1/equipos/:id` | Ficha: datos, fuentes con su contexto y su `ubicacion_estado`, último reporte, `ubicacion_estado`, apps instaladas, alertas abiertas. |
 | `PATCH /v1/equipos/:id` | `nombre`, `etiqueta` (número de activo), `serie`, `dominio`, `asignado_a`, `notas`, `estado` (`activo`, `guardado`, `perdido`, `retirado`). Cambiarlo de dominio cierra las alertas de reglas del dominio que deja. |
 | `GET /v1/equipos/:id/recorrido` | Puntos de ubicación entre `desde` y `hasta` (fechas ISO; por defecto, las últimas 24 horas). |
 | `GET /v1/equipos/:id/reportes` | El historial completo entre `desde` y `hasta` (por defecto, las últimas 24 horas), hasta `limite` filas. |
@@ -228,6 +287,14 @@ zonas, reglas y códigos de alta, `ordenar` para mandarle órdenes a un equipo y
 | `GET /v1/equipos/:id/ordenes` | Las últimas órdenes y en qué quedaron. |
 | `POST /v1/equipos/:id/unir` | `{con: <id>}`: dos filas que eran el mismo equipo pasan a ser una. |
 | `DELETE /v1/equipos/:id` | Lo saca del inventario y revoca sus credenciales. El historial se borra. Permiso `admin`. |
+
+**`ubicacion_estado` del equipo** es el de una de sus fuentes (el
+`ubicacion_estado` del reporte), con `t` (cuándo lo dijo), `fuente_tipo`,
+`fuente_paquete` y `fuente_nombre`: la que consiguió posición en la última
+hora, si alguna lo hizo; si no, la que lo dijo más reciente. `null` si ninguna
+fuente lo manda todavía (una versión vieja): el panel dice «El equipo aún no
+informa el motivo». El historial (`/reportes`) trae `ubicacion_motivo` de cada
+reporte.
 
 **Retirar no es borrar.** `estado: retirado` deja la ficha y el historial, y el
 equipo deja de contar para las alertas. Borrar es para lo que entró por error.

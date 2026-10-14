@@ -1,5 +1,7 @@
 package com.chalonasoft.devicetrack.plugin
 
+import android.Manifest
+import android.app.Activity
 import android.content.Context
 import android.os.Handler
 import android.os.Looper
@@ -9,8 +11,11 @@ import com.chalonasoft.devicetrack.comun.Lectura
 import com.chalonasoft.devicetrack.comun.Sonar
 import com.chalonasoft.devicetrack.comun.Ubicacion
 import io.flutter.embedding.engine.plugins.FlutterPlugin
+import io.flutter.embedding.engine.plugins.activity.ActivityAware
+import io.flutter.embedding.engine.plugins.activity.ActivityPluginBinding
 import io.flutter.plugin.common.MethodCall
 import io.flutter.plugin.common.MethodChannel
+import io.flutter.plugin.common.PluginRegistry
 import org.json.JSONArray
 import org.json.JSONObject
 import java.util.concurrent.ExecutorService
@@ -29,7 +34,13 @@ import java.util.concurrent.RejectedExecutionException
  * - `estado` → `{bateria, cargando, red: {tipo, ssid?}, almacenamiento: {libre, total}}`.
  * - `ubicacion {plazo_ms}` → `{lat, lng, precision_m, t}`, o null si la app no
  *   tiene el permiso o no llegó ninguna a tiempo.
+ * - `ubicacionConEstado {plazo_ms}` → `{ubicacion?, estado}`: la posición (o
+ *   null) y SIEMPRE el porqué (`Ubicacion.leerConEstado`: permiso, GPS
+ *   apagado, sin señal…). Es el `ubicacion_estado` del reporte.
  * - `permisoUbicacion` → si la app tiene el permiso (fino o aproximado).
+ * - `ubicacionPedida` → la app avisa que pidió el permiso (para distinguir
+ *   «nunca se pidió» de «dijeron que no para siempre»). Si la respuesta pasa
+ *   por la pantalla de Flutter, el plugin la anota solo.
  * - `apps` → `[{paquete, version, build, nombre}]`; `firma` → su SHA-256.
  *
  * Hacer sonar:
@@ -49,9 +60,16 @@ import java.util.concurrent.RejectedExecutionException
  * en un equipo con cientos, el disco) corre en un hilo de fondo; el canal se
  * contesta siempre en el principal.
  */
-class DeviceTrackPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
+class DeviceTrackPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, ActivityAware,
+    PluginRegistry.RequestPermissionsResultListener {
     private var canal: MethodChannel? = null
     private var contexto: Context? = null
+
+    // La pantalla, mientras la haya: con ella Android dice si un permiso
+    // negado se puede volver a pedir.
+    @Volatile
+    private var actividad: Activity? = null
+    private var enlaceActividad: ActivityPluginBinding? = null
     private var fondo: ExecutorService? = null
     private val principal = Handler(Looper.getMainLooper())
 
@@ -89,6 +107,35 @@ class DeviceTrackPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
         fondo?.shutdown()
         fondo = null
         contexto = null
+    }
+
+    override fun onAttachedToActivity(binding: ActivityPluginBinding) {
+        actividad = binding.activity
+        enlaceActividad = binding
+        binding.addRequestPermissionsResultListener(this)
+    }
+
+    override fun onDetachedFromActivityForConfigChanges() = onDetachedFromActivity()
+
+    override fun onReattachedToActivityForConfigChanges(binding: ActivityPluginBinding) = onAttachedToActivity(binding)
+
+    override fun onDetachedFromActivity() {
+        enlaceActividad?.removeRequestPermissionsResultListener(this)
+        enlaceActividad = null
+        actividad = null
+    }
+
+    /**
+     * Mira (sin quedarse con ella) la respuesta a cualquier pedido de permisos
+     * de la app —el de permission_handler, por ejemplo—: si era la ubicación,
+     * anota qué contestaron. Devuelve false para que le llegue a quien la pidió.
+     */
+    override fun onRequestPermissionsResult(requestCode: Int, permissions: Array<out String>, grantResults: IntArray): Boolean {
+        val a = actividad ?: return false
+        if (permissions.any { it == Manifest.permission.ACCESS_FINE_LOCATION || it == Manifest.permission.ACCESS_COARSE_LOCATION }) {
+            runCatching { Ubicacion.anotarRespuesta(a) }
+        }
+        return false
     }
 
     override fun onMethodCall(call: MethodCall, result: MethodChannel.Result) {
@@ -147,7 +194,19 @@ class DeviceTrackPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
             val plazo = (call.argument<Number>("plazo_ms")?.toLong() ?: 20_000L).coerceIn(1_000L, 60_000L)
             if (Ubicacion.tienePermiso(ctx)) Ubicacion.leer(ctx, plazo)?.let { aDart(Ubicacion.json(it)) } else null
         }
+        "ubicacionConEstado" -> {
+            val plazo = (call.argument<Number>("plazo_ms")?.toLong() ?: 20_000L).coerceIn(1_000L, 60_000L)
+            // La app con el plugin reporta con la pantalla delante: le basta
+            // «mientras se usa».
+            val u = Ubicacion.leerConEstado(ctx, plazo, segundoPlano = false, actividad = actividad)
+            mapOf("ubicacion" to u.posicion?.let { aDart(Ubicacion.json(it)) }, "estado" to aDart(u.estado))
+        }
         "permisoUbicacion" -> Ubicacion.tienePermiso(ctx)
+        "ubicacionPedida" -> {
+            val a = actividad
+            if (a != null) Ubicacion.anotarRespuesta(a) else Ubicacion.anotarPedida(ctx)
+            null
+        }
         "apps" -> aDart(Lectura.apps(ctx))
         "firma" -> Lectura.firma(Lectura.apps(ctx))
         "almacen" -> leerAlmacen(ctx)

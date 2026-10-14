@@ -324,6 +324,9 @@ class MainActivity : Activity() {
 
     override fun onRequestPermissionsResult(requestCode: Int, permissions: Array<out String>, grantResults: IntArray) {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults)
+        // Qué contestaron, para que el reporte diga «denegada» o «denegada
+        // para siempre» (el servicio no lo puede preguntar sin pantalla).
+        if (requestCode == PIDE_UBICACION) Ubicacion.anotarRespuesta(this)
         // Con la ubicación concedida el servicio cambia a tipo ubicación.
         if (requestCode == PIDE_UBICACION || requestCode == PIDE_UBICACION_FONDO) {
             despertar(this, AgenteService.ACCION_INICIAR)

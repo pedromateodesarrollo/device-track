@@ -55,9 +55,33 @@ class Almacen(context: Context) {
         get() = p.getString("ultimo_error", "") ?: ""
         set(v) = p.edit().putString("ultimo_error", v).apply()
 
+    /**
+     * Si esta app ya le pidió a la persona el permiso de ubicación alguna
+     * vez. Android no lo dice: sin esto, «nunca se pidió» y «dijo que no para
+     * siempre» se ven iguales. Lo anota [Ubicacion.anotarRespuesta].
+     */
+    var ubicacionPedida: Boolean
+        get() = p.getBoolean("ubicacion_pedida", false)
+        set(v) = p.edit().putBoolean("ubicacion_pedida", v).apply()
+
+    /**
+     * Qué contestó la última vez que se pidió: `""` (la dio), `denegada` (se
+     * puede volver a pedir) o `denegada_siempre` (solo en Ajustes). Sirve
+     * cuando se lee sin pantalla delante (el servicio del agente), donde
+     * Android no deja preguntar si se puede volver a pedir.
+     */
+    var ubicacionRechazo: String
+        get() = p.getString("ubicacion_rechazo", "") ?: ""
+        set(v) = p.edit().putString("ubicacion_rechazo", v).apply()
+
     val dadoDeAlta: Boolean get() = hub.isNotEmpty() && credencial.isNotEmpty()
 
-    fun olvidar() = p.edit().clear().apply()
+    /** Lo del permiso de ubicación se queda: es de la app, no del alta. */
+    fun olvidar() {
+        val pedida = ubicacionPedida
+        val rechazo = ubicacionRechazo
+        p.edit().clear().putBoolean("ubicacion_pedida", pedida).putString("ubicacion_rechazo", rechazo).apply()
+    }
 
     /**
      * Una orden se entrega hasta que el equipo acusa recibo, así que puede

@@ -49,6 +49,25 @@ class EquipoNativo {
     return m == null ? null : Ubicacion.desdeJson(m);
   }
 
+  /// Una posición (o null) y, siempre, por qué la hay o no la hay: permiso
+  /// negado, ubicación del teléfono apagada, sin señal… (`ubicacion_estado`
+  /// del reporte).
+  Future<({Ubicacion? ubicacion, EstadoUbicacion estado})> ubicacionConEstado({
+    Duration plazo = const Duration(seconds: 20),
+  }) async {
+    final m = await canal.invokeMapMethod<String, Object?>('ubicacionConEstado', {'plazo_ms': plazo.inMilliseconds}) ??
+        const {};
+    return (
+      ubicacion: Ubicacion.desdeJson(m['ubicacion']),
+      estado: EstadoUbicacion.desdeJson(m['estado']) ?? const EstadoUbicacion('error'),
+    );
+  }
+
+  /// La app acaba de pedir el permiso de ubicación (llamarlo DESPUÉS de la
+  /// respuesta): así el reporte distingue «nunca se pidió» de «dijeron que no
+  /// para siempre».
+  Future<void> ubicacionPedida() => canal.invokeMethod<void>('ubicacionPedida');
+
   /// Si la app tiene permiso de ubicación (fino o aproximado).
   Future<bool> permisoUbicacion() async => await canal.invokeMethod<bool>('permisoUbicacion') ?? false;
 

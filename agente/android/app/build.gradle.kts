@@ -25,8 +25,8 @@ android {
         applicationId = "com.chalonasoft.devicetrack"
         minSdk = 24
         targetSdk = 36
-        versionCode = 4
-        versionName = "0.1.3"
+        versionCode = 5
+        versionName = "0.1.4"
         buildConfigField("String", "HUB_POR_DEFECTO", "\"${ajuste("hub", "https://devicetrack.chalonasoft.com")}\"")
         // apk-server (la biblioteca lo lee del manifiesto; el comando de
         // publicar, del APK).

@@ -10,6 +10,7 @@ import 'package:flutter/material.dart';
 
 import '../modelo/equipo.dart';
 import '../modelo/formato.dart';
+import '../modelo/ubicacion.dart' show ExplicaUbicacion;
 import '../navegacion.dart';
 import '../sesion.dart';
 import '../sistema.dart';
@@ -368,8 +369,80 @@ class _EquipoPageState extends State<EquipoPage> {
                 : '${fecha(e['ultimo_reporte'])} · ${motivos[e['ultimo_motivo']] ?? e['ultimo_motivo'] ?? ''}',
           ),
           Dato('Última vez', e['conectado'] == true ? 'Conectado ahora' : fecha(e['ultima_vez'])),
+          _ubicacion(e),
           Dato('En el inventario desde', fecha(e['primera_vez'])),
           Dato('Huella', '${e['huella'] ?? '—'}'),
+        ],
+      ),
+    );
+  }
+
+  /// La fila «Ubicación»: cuándo fue la última y, si no llega, por qué y qué
+  /// hacer (`ExplicaUbicacion`, lo mismo que la web).
+  Widget _ubicacion(Json e) {
+    final u = ExplicaUbicacion.de(e);
+    final p = Paleta.de(context);
+    final hay = e['lat'] != null;
+    final precision = decimal(e['precision_m']);
+    const chica = TextStyle(fontSize: 13);
+    return Dato(
+      'Ubicación',
+      '',
+      hijo: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(hay ? [fecha(e['ubicacion_t']), if (precision != null) '± ${distancia(precision)}'].join(' · ') : 'Sin ubicación'),
+          if (u.vieja.isNotEmpty) Padding(padding: const EdgeInsets.only(top: 4), child: Text(u.vieja, style: chica)),
+          if (!u.ok || !hay)
+            Padding(
+              padding: const EdgeInsets.only(top: 4),
+              child: Text(
+                u.texto,
+                style: u.motivo == null
+                    ? apagado(context, tamano: 13)
+                    : chica.copyWith(color: u.arreglable ? p.tibio : null),
+              ),
+            ),
+          if (u.queHacer.isNotEmpty && !u.ok)
+            Container(
+              margin: const EdgeInsets.only(top: 6),
+              padding: const EdgeInsets.fromLTRB(8, 6, 8, 6),
+              decoration: BoxDecoration(
+                color: p.fondo2,
+                border: Border(left: BorderSide(color: p.tibio, width: 3)),
+                borderRadius: BorderRadius.circular(4),
+              ),
+              child: SelectableText.rich(
+                TextSpan(
+                  style: chica,
+                  children: [
+                    const TextSpan(text: 'Qué hacer: ', style: TextStyle(fontWeight: FontWeight.w700)),
+                    TextSpan(text: u.queHacer),
+                  ],
+                ),
+              ),
+            ),
+          for (final f in u.porFuente)
+            Padding(
+              padding: const EdgeInsets.only(top: 4),
+              child: Text.rich(
+                TextSpan(
+                  style: chica,
+                  children: [
+                    TextSpan(text: f.app, style: const TextStyle(fontWeight: FontWeight.w700)),
+                    TextSpan(text: ' (${f.cuando}): ${f.texto}'),
+                  ],
+                ),
+              ),
+            ),
+          if (u.datos.isNotEmpty || u.quien.isNotEmpty)
+            Padding(
+              padding: const EdgeInsets.only(top: 4),
+              child: Text(
+                [if (u.datos.isNotEmpty) u.datos.join(' · '), if (u.quien.isNotEmpty) u.quien].join(' — '),
+                style: apagado(context, tamano: 12),
+              ),
+            ),
         ],
       ),
     );

@@ -641,3 +641,10 @@ table.compacta th, table.compacta td { padding: 6px 8px; }
   .ver-conversaciones { display: inline-flex; }
   .burbuja { max-width: 100%; }
 }
+
+/* Ubicación: por qué no hay, y qué hacer (ubicacion.js) */
+dl.datos dd.ubicacion p { margin: 4px 0 0; }
+.ubic-motivo.arreglable { color: var(--tibio); }
+.ubic-hacer { font-size: 13px; padding: 6px 8px; border-left: 3px solid var(--tibio); background: var(--fondo-2); border-radius: 4px; }
+.ubic-fuentes { margin: 4px 0 0; padding-left: 18px; }
+.sin-ubic { color: var(--tibio); margin-left: 6px; font-size: 15px; cursor: help; }

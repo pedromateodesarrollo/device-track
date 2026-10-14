@@ -73,7 +73,8 @@ void registraRutasPanel(Servidor s, Canal canal, Ordenes ordenes, Alertas alerta
                 (select count(*) from dt.alerta a where a.equipo = e.id and a.cerrada is null) as alertas,
                 (select coalesce(jsonb_agg(jsonb_build_object(
                           'tipo', f.tipo, 'paquete', f.paquete, 'nombre', ${_nombreFuente('f', 'e')},
-                          'version', f.version, 'ultima_vez', f.ultima_vez, 'contexto', f.contexto)
+                          'version', f.version, 'ultima_vez', f.ultima_vez, 'contexto', f.contexto,
+                          'ubicacion_estado', f.ubicacion_estado, 'ubicacion_estado_t', f.ubicacion_estado_t)
                         order by f.ultima_vez desc), '[]'::jsonb)
                    from dt.fuente f where f.equipo = e.id and f.revocada is null) as fuentes
            from dt.equipo e
@@ -95,7 +96,7 @@ void registraRutasPanel(Servidor s, Canal canal, Ordenes ordenes, Alertas alerta
     if (e == null) return _noEsta();
     final fuentes = await p.bd.filas(
       '''select f.id, f.tipo, f.paquete, ${_nombreFuente('f', 'e')} as nombre, f.version, f.build,
-                f.contexto, f.creado, f.ultima_vez, f.revocada
+                f.contexto, f.creado, f.ultima_vez, f.revocada, f.ubicacion_estado, f.ubicacion_estado_t
            from dt.fuente f join dt.equipo e on e.id = f.equipo
           where f.equipo = @i order by f.ultima_vez desc''',
       {'i': id},
@@ -201,7 +202,7 @@ void registraRutasPanel(Servidor s, Canal canal, Ordenes ordenes, Alertas alerta
     final limite = (int.tryParse(p.consulta['limite'] ?? '') ?? 500).clamp(1, 5000);
     final r = await p.bd.filas(
       '''select t, recibido, motivo, bateria, cargando, red_tipo, red_ssid,
-                lat, lng, precision_m, almacenamiento_libre
+                lat, lng, precision_m, almacenamiento_libre, ubicacion_motivo
            from dt.reporte
           where equipo = @i and t between @d and @h
           order by t desc limit @l''',
@@ -747,7 +748,26 @@ String _columnasEquipo(String t) => [
       'asignado_a', 'estado', 'conectado', 'ultima_vez', 'ultimo_reporte', 'ultimo_motivo',
       'bateria', 'cargando', 'red_tipo', 'red_ssid', 'lat', 'lng', 'precision_m', 'ubicacion_t',
       'almacenamiento_libre', 'almacenamiento_total',
-    ].map((c) => '$t.$c').followedBy(['(select nombre from dt.dominio where id = $t.dominio) as dominio_nombre']).join(', ');
+    ].map((c) => '$t.$c').followedBy([
+      '(select nombre from dt.dominio where id = $t.dominio) as dominio_nombre',
+      '${_estadoUbicacion(t)} as ubicacion_estado',
+    ]).join(', ');
+
+/// Por qué el equipo [t] tiene o no tiene ubicación, tal como lo dijo una de
+/// sus fuentes (`ubicacion_estado` de docs/api.md), con `t` (cuándo),
+/// `fuente_tipo`, `fuente_paquete` y `fuente_nombre`. Si una fuente la
+/// consiguió en la última hora, esa (el agente la tiene aunque la app no);
+/// si no, la que lo dijo más reciente. Null si ninguna fuente lo manda
+/// todavía: el panel dice «versión vieja».
+String _estadoUbicacion(String t) => '''(select f.ubicacion_estado || jsonb_build_object(
+          't', f.ubicacion_estado_t, 'fuente_tipo', f.tipo, 'fuente_paquete', f.paquete,
+          'fuente_nombre', ${_nombreFuente('f', t)})
+       from dt.fuente f
+      where f.equipo = $t.id and f.revocada is null and f.ubicacion_estado is not null
+      order by (f.ubicacion_estado->>'motivo' in ('ok', 'aproximada', 'simulada', 'vieja')
+                and f.ubicacion_estado_t > now() - interval '1 hour') desc,
+               f.ubicacion_estado_t desc
+      limit 1)''';
 
 /// El nombre de la app de la fuente [f]: el que ella manda (`fuente.nombre`)
 /// o, si es de antes de mandarlo, el de su paquete en la lista de apps

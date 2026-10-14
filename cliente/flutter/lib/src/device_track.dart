@@ -25,6 +25,7 @@ class EstadoDeviceTrack {
     this.pendientes = 0,
     this.sonando = false,
     this.config = ConfigEquipo.porDefecto,
+    this.ubicacion,
   });
 
   /// Tiene una credencial que el hub aceptó (o que todavía no rechazó).
@@ -57,6 +58,10 @@ class EstadoDeviceTrack {
   /// La configuración vigente de la organización.
   final ConfigEquipo config;
 
+  /// Cómo salió la ubicación en el último reporte y por qué (sin permiso,
+  /// GPS apagado, sin señal…). Null hasta el primero.
+  final EstadoUbicacion? ubicacion;
+
   EstadoDeviceTrack _con({
     bool? dadoDeAlta,
     Object? equipoId = _igual,
@@ -67,6 +72,7 @@ class EstadoDeviceTrack {
     int? pendientes,
     bool? sonando,
     ConfigEquipo? config,
+    EstadoUbicacion? ubicacion,
   }) =>
       EstadoDeviceTrack(
         dadoDeAlta: dadoDeAlta ?? this.dadoDeAlta,
@@ -78,6 +84,7 @@ class EstadoDeviceTrack {
         pendientes: pendientes ?? this.pendientes,
         sonando: sonando ?? this.sonando,
         config: config ?? this.config,
+        ubicacion: ubicacion ?? this.ubicacion,
       );
 
   @override
@@ -91,11 +98,12 @@ class EstadoDeviceTrack {
       other.ultimoError == ultimoError &&
       other.pendientes == pendientes &&
       other.sonando == sonando &&
-      other.config == config;
+      other.config == config &&
+      other.ubicacion == ubicacion;
 
   @override
   int get hashCode => Object.hash(
-      dadoDeAlta, equipoId, equipoNombre, conectado, ultimoReporte, ultimoError, pendientes, sonando, config);
+      dadoDeAlta, equipoId, equipoNombre, conectado, ultimoReporte, ultimoError, pendientes, sonando, config, ubicacion);
 
   @override
   String toString() => 'EstadoDeviceTrack(${dadoDeAlta ? 'equipo $equipoId' : 'sin alta'}'
@@ -336,19 +344,36 @@ class DeviceTrack with WidgetsBindingObserver {
   }
 
   /// Lo que se lee del equipo: estado y, si la organización la pide y la app
-  /// tiene el permiso, la ubicación. Es lo que se guarda si no sale.
+  /// tiene el permiso, la ubicación, siempre con el porqué
+  /// ([EstadoUbicacion]). Es lo que se guarda si no sale.
   Future<Reporte> _leer(MotivoReporte motivo) async {
     var r = Reporte(motivo: motivo);
     try {
       r = await nativo.estado(motivo: motivo);
     } catch (_) {}
+    var estadoU = EstadoUbicacion.noPedida;
     if (_config.ubicacion) {
       try {
-        final u = await nativo.ubicacion(plazo: plazoUbicacion);
-        if (u != null) r = r.con(ubicacion: u);
-      } catch (_) {}
+        final u = await nativo.ubicacionConEstado(plazo: plazoUbicacion);
+        estadoU = u.estado;
+        if (u.ubicacion != null) r = r.con(ubicacion: u.ubicacion);
+      } catch (e) {
+        estadoU = EstadoUbicacion('error', {'error': '$e'.length > 200 ? '$e'.substring(0, 200) : '$e'});
+      }
     }
+    r = r.con(ubicacionEstado: estadoU);
+    _actualiza(ubicacion: estadoU);
     return r.paraCola;
+  }
+
+  /// La app acaba de pedir el permiso de ubicación: llamarlo DESPUÉS de la
+  /// respuesta (`await Permission.location.request()`). Con eso el panel
+  /// distingue «la app todavía no lo pidió» de «dijeron que no para siempre».
+  /// No lanza.
+  Future<void> ubicacionPedida() async {
+    try {
+      await nativo.ubicacionPedida();
+    } catch (_) {}
   }
 
   /// El reporte entero: lo leído, los atrasados, las apps si cambiaron, el
@@ -682,6 +707,7 @@ class DeviceTrack with WidgetsBindingObserver {
     int? pendientes,
     bool? sonando,
     ConfigEquipo? config,
+    EstadoUbicacion? ubicacion,
   }) {
     if (_desechado) return;
     estado.value = estado.value._con(
@@ -694,6 +720,7 @@ class DeviceTrack with WidgetsBindingObserver {
       pendientes: pendientes,
       sonando: sonando,
       config: config,
+      ubicacion: ubicacion,
     );
   }
 }

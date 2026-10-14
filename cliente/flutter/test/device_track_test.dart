@@ -40,6 +40,15 @@ class NativoFalso {
         };
       case 'ubicacion':
         return ubicacion;
+      case 'ubicacionConEstado':
+        return {
+          'ubicacion': ubicacion,
+          'estado': ubicacion == null
+              ? {'motivo': 'sin_pedir', 'permiso': 'ninguno', 'pedido': false}
+              : {'motivo': 'ok', 'permiso': 'precisa', 'proveedor': 'gps', 'edad_s': 3},
+        };
+      case 'ubicacionPedida':
+        return null;
       case 'firma':
         return firma;
       case 'apps':
@@ -155,6 +164,8 @@ void main() {
     expect(r['fuente'], {'tipo': 'app', 'paquete': 'com.ejemplo.app', 'nombre': 'Ejemplo', 'version': '1.0.0', 'build': 1});
     expect(r['equipo'], {'android': 30});
     expect(r.containsKey('ubicacion'), isFalse, reason: 'sin permiso no hay ubicación');
+    expect(r['ubicacion_estado'], {'motivo': 'sin_pedir', 'permiso': 'ninguno', 'pedido': false},
+        reason: 'sin ubicación, el porqué va igual');
     expect(nativo.almacen['firma_apps'], 'firma-1');
 
     final e = d.estado.value;
@@ -180,6 +191,8 @@ void main() {
     expect(hub.altas, isEmpty);
     expect(hub.reportes.single.containsKey('apps'), isFalse);
     expect(hub.reportes.single['ubicacion'], {'lat': 18.47, 'lng': -69.9, 'precision_m': 9.0, 't': '2026-10-08T09:00:00.000Z'});
+    expect((hub.reportes.single['ubicacion_estado'] as Map)['motivo'], 'ok');
+    expect(d.estado.value.ubicacion?.motivo, 'ok');
     expect(d.estado.value.equipoId, 42);
   });
 
@@ -354,6 +367,12 @@ void main() {
     expect(d.estado.value.config.ubicacion, isFalse);
     expect(nativo.almacen['intervalo_s'], 300);
     expect(nativo.almacen['ubicacion'], false);
+
+    // Sin ubicación pedida, el reporte lo dice y no la lee.
+    nativo.ubicacion = {'lat': 18.47, 'lng': -69.9};
+    expect(await d.reportar(), isTrue);
+    expect(hub.reportes.last['ubicacion_estado'], {'motivo': 'no_pedida'});
+    expect(hub.reportes.last.containsKey('ubicacion'), isFalse);
   });
 
   test('en segundo plano cierra el WebSocket; al volver lo abre, y reporta solo pasado el freno', () async {

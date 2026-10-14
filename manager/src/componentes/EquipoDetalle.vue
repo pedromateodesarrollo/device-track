@@ -6,6 +6,7 @@ import {
 } from '../api.js'
 import { creaMapa, circuloZona, colores, esc, panelEncima, L } from '../mapa.js'
 import Bateria from './Bateria.vue'
+import { explicaUbicacion } from '../ubicacion.js'
 
 const props = defineProps({ id: Number, yo: Object })
 
@@ -106,6 +107,9 @@ const usoDisco = computed(() => {
   if (!total) return null
   return { libre, total, pct: Math.round(((total - (libre ?? 0)) / total) * 100) }
 })
+// Por qué hay o no hay ubicación, y qué hacer (ubicacion.js).
+const ubic = computed(() => explicaUbicacion(e.value))
+
 const red = computed(() => {
   if (!e.value?.red_tipo) return 'Sin dato'
   return redes[e.value.red_tipo] || e.value.red_tipo
@@ -433,11 +437,24 @@ const apps = computed(() => e.value?.apps || [])
           <dt>Última vez</dt>
           <dd>{{ e.conectado ? 'Conectado ahora' : fecha(e.ultima_vez) }}</dd>
           <dt>Ubicación</dt>
-          <dd>
+          <dd class="ubicacion">
             <template v-if="e.lat != null">
               {{ fecha(e.ubicacion_t) }}<span v-if="e.precision_m" class="apagado"> · ± {{ distancia(e.precision_m) }}</span>
             </template>
-            <span v-else class="apagado">Sin ubicación todavía</span>
+            <span v-else>Sin ubicación</span>
+            <p v-if="ubic.vieja" class="ubic-motivo">{{ ubic.vieja }}</p>
+            <p
+              v-if="ubic.motivo !== 'ok' || e.lat == null"
+              class="ubic-motivo"
+              :class="{ arreglable: ubic.arreglable, apagado: !ubic.motivo }"
+            >{{ ubic.texto }}</p>
+            <p v-if="ubic.queHacer && ubic.motivo !== 'ok'" class="ubic-hacer"><strong>Qué hacer:</strong> {{ ubic.queHacer }}</p>
+            <ul v-if="ubic.porFuente.length" class="ubic-fuentes chico">
+              <li v-for="f in ubic.porFuente" :key="f.app"><strong>{{ f.app }}</strong> ({{ f.cuando }}): {{ f.texto }}</li>
+            </ul>
+            <p v-if="ubic.datos.length || ubic.quien" class="apagado chico ubic-datos">
+              {{ [ubic.datos.join(' · '), ubic.quien].filter(Boolean).join(' — ') }}
+            </p>
           </dd>
           <dt>En el inventario desde</dt>
           <dd>{{ fecha(e.primera_vez) }}</dd>
